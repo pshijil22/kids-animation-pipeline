@@ -1,0 +1,110 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    🚀 QUICK REFERENCE - GITHUB PUSH COMMANDS
+═══════════════════════════════════════════════════════════════════════════════
+
+YOUR INFO:
+  Username: pshijil22
+  Email: pshijil22@gmail.com
+  Repo: kids-animation-pipeline
+
+═══════════════════════════════════════════════════════════════════════════════
+
+COMMANDS TO RUN (IN ORDER)
+
+1️⃣  Configure Git (first time only):
+    ───────────────────────────────────────────────────────────────────────────
+    git config --global user.name "pshijil22"
+    git config --global user.email "pshijil22@gmail.com"
+    git config --global credential.helper store
+
+2️⃣  Create GitHub repo:
+    ───────────────────────────────────────────────────────────────────────────
+    Go to: https://github.com/new
+    - Name: kids-animation-pipeline
+    - Visibility: Public
+    - DO NOT initialize with README
+    - Create
+
+3️⃣  Create .gitignore file:
+    ───────────────────────────────────────────────────────────────────────────
+    See MANUAL_GITHUB_PUSH.md Step 5
+
+4️⃣  Initialize git:
+    ───────────────────────────────────────────────────────────────────────────
+    git init
+
+5️⃣  Add remote:
+    ───────────────────────────────────────────────────────────────────────────
+    git remote add origin https://github.com/pshijil22/kids-animation-pipeline.git
+
+6️⃣  Add all files:
+    ───────────────────────────────────────────────────────────────────────────
+    git add .
+
+7️⃣  Create commit:
+    ───────────────────────────────────────────────────────────────────────────
+    git commit -m "Initial commit: Kids Animation Pipeline - All phases complete"
+
+8️⃣  Set main branch:
+    ───────────────────────────────────────────────────────────────────────────
+    git branch -M main
+
+9️⃣  Push to GitHub:
+    ───────────────────────────────────────────────────────────────────────────
+    git push -u origin main
+    
+    When prompted:
+    Username: pshijil22
+    Password: [Paste your GitHub token]
+
+🔟  Enable Actions:
+    ───────────────────────────────────────────────────────────────────────────
+    Go to: https://github.com/pshijil22/kids-animation-pipeline/settings
+    Settings → Actions → General
+    Select "Allow all actions..."
+    Save
+
+═══════════════════════════════════════════════════════════════════════════════
+
+VERIFY
+
+✅ Go to: https://github.com/pshijil22/kids-animation-pipeline
+   Should see your code
+
+✅ Go to Actions tab
+   Should see 3 workflows
+
+✅ Click "Generate Video (Manual)"
+   Test workflow
+
+═══════════════════════════════════════════════════════════════════════════════
+
+TIMING
+
+Configure:    2 min
+Create repo:  1 min
+Setup git:    3 min
+Push:         2 min
+Enable:       1 min
+──────────────────
+TOTAL:        ~9 minutes
+
+═══════════════════════════════════════════════════════════════════════════════
+
+WHAT HAPPENS NEXT
+
+Today:        Code on GitHub ✅
+              Tests run ✅
+              
+Tomorrow 9AM: First video generates automatically ✅
+
+Every day:    New video generated ✅
+              Available for download ✅
+
+═══════════════════════════════════════════════════════════════════════════════
+
+NEED HELP?
+
+See: MANUAL_GITHUB_PUSH.md for detailed instructions with explanations
+
+═══════════════════════════════════════════════════════════════════════════════

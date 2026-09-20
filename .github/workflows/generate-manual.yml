@@ -1,0 +1,166 @@
+name: Generate Video (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'Number of videos to generate'
+        required: false
+        default: '1'
+      model:
+        description: 'LLM model to use'
+        required: false
+        default: 'llama3.2:3b'
+
+jobs:
+  generate-manual:
+    runs-on: ubuntu-latest
+    
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+        options: >-
+          --health-cmd "curl -f http://localhost:11434/api/tags || exit 1"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 5
+        volumes:
+          - ollama-data:/root/.ollama
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y espeak-ng ffmpeg curl
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r worker/requirements.txt
+    
+    - name: Create data directories
+      run: |
+        mkdir -p data/stories
+        mkdir -p data/audio
+        mkdir -p data/scenes
+        mkdir -p data/videos
+    
+    - name: Wait for Ollama
+      run: |
+        echo "Waiting for Ollama service..."
+        for i in {1..60}; do
+          if curl -f http://localhost:11434/api/tags; then
+            echo "✅ Ollama is ready"
+            break
+          fi
+          echo "Waiting... ($i/60)"
+          sleep 5
+        done
+    
+    - name: Pull Ollama model
+      run: |
+        MODEL=${{ github.event.inputs.model || 'llama3.2:3b' }}
+        echo "Pulling $MODEL model..."
+        curl -X POST http://localhost:11434/api/pull -d "{\"name\":\"$MODEL\"}" -v
+        sleep 30
+    
+    - name: Generate videos
+      run: |
+        cd worker
+        export OLLAMA_URL=http://localhost:11434
+        export OLLAMA_MODEL=${{ github.event.inputs.model || 'llama3.2:3b' }}
+        COUNT=${{ github.event.inputs.count || '1' }}
+        
+        for i in $(seq 1 $COUNT); do
+          echo "Generating video $i of $COUNT..."
+          python -c "
+import asyncio
+from pipeline import generate_story
+import json
+import datetime
+
+try:
+    result = asyncio.run(generate_story())
+    
+    log = {
+        'batch': '$i',
+        'timestamp': datetime.datetime.now().isoformat(),
+        'status': 'success',
+        'job_id': result.get('job_id'),
+        'title': result.get('title'),
+        'video_file': result.get('video_file'),
+        'duration': result.get('total_duration')
+    }
+    
+    print('✅ Video $i generated!')
+    print(json.dumps(log, indent=2))
+    
+except Exception as e:
+    print(f'❌ Generation $i failed: {e}')
+    import traceback
+    traceback.print_exc()
+    exit(1)
+          "
+          echo "Waiting 30 seconds before next generation..."
+          sleep 30
+        done
+    
+    - name: Generate summary
+      if: always()
+      run: |
+        echo "## 📹 Generation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Videos Generated:** $(ls -1 data/videos/*.mp4 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Generated Files:" >> $GITHUB_STEP_SUMMARY
+        ls -lh data/videos/ 2>/dev/null | tail -5 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+    
+    - name: Upload videos
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: videos-${{ github.run_id }}
+        path: data/videos/
+        retention-days: 30
+    
+    - name: Upload stories
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: stories-${{ github.run_id }}
+        path: data/stories/
+        retention-days: 30
+    
+    - name: Upload audio
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: audio-${{ github.run_id }}
+        path: data/audio/
+        retention-days: 30
+    
+    - name: Create release (optional)
+      if: success()
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: video-${{ github.run_id }}
+        release_name: Generated Videos Run ${{ github.run_id }}
+        body: |
+          Generated ${{ github.event.inputs.count || '1' }} videos
+          Model: ${{ github.event.inputs.model || 'llama3.2:3b' }}
+        draft: false
+        prerelease: false
+
+volumes:
+  ollama-data:

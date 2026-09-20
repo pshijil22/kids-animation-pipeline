@@ -1,0 +1,83 @@
+name: Build and Test Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    services:
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+        options: >-
+          --health-cmd "curl -f http://localhost:11434/api/tags || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y espeak-ng ffmpeg curl
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r worker/requirements.txt
+    
+    - name: Pull Ollama model
+      run: |
+        docker exec $(docker ps -q -f "ancestor=ollama/ollama") ollama pull llama3.2:3b
+      continue-on-error: true
+    
+    - name: Lint Python code
+      run: |
+        pip install flake8
+        flake8 worker/*.py --count --select=E9,F63,F7,F82 --show-source --statistics
+      continue-on-error: true
+    
+    - name: Test imports
+      run: |
+        cd worker
+        python -c "from pipeline import generate_story; print('✅ Pipeline imports OK')"
+        python -c "from story import generate_story_with_llm; print('✅ Story module OK')"
+        python -c "from tts import generate_narration_from_story; print('✅ TTS module OK')"
+        python -c "from scenes import generate_scenes; print('✅ Scenes module OK')"
+        python -c "from video import create_video; print('✅ Video module OK')"
+        python -c "from youtube import upload_to_youtube; print('✅ YouTube module OK')"
+    
+    - name: Verify Docker files
+      run: |
+        ls -la worker/Dockerfile
+        ls -la docker-compose.yml
+        ls -la .env.example
+    
+    - name: Check documentation
+      run: |
+        test -f README.md && echo "✅ README.md exists"
+        test -f QUICK_START.md && echo "✅ QUICK_START.md exists"
+        test -f FINAL_README.md && echo "✅ FINAL_README.md exists"
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: |
+          worker/
+          *.md
