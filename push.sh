@@ -1,5 +1,5 @@
 #!/bin/bash
-# GitHub Push Script
+# GitHub Push Script - Fixed Token Handling
 
 set -e
 
@@ -9,7 +9,7 @@ GITHUB_TOKEN="$1"
 REPO_NAME="kids-animation-pipeline"
 
 if [ -z "$GITHUB_TOKEN" ]; then
-    echo "❌ Error: GitHub token required"
+    echo "❌ Error: GitHub token required as argument"
     exit 1
 fi
 
@@ -18,7 +18,6 @@ cd /repo
 echo "📋 Step 1: Configure Git"
 git config --global user.name "$GITHUB_USERNAME"
 git config --global user.email "$GITHUB_EMAIL"
-git config --global credential.helper store
 echo "✅ Git configured"
 echo ""
 
@@ -64,22 +63,20 @@ echo ""
 
 echo "📋 Step 4: Add remote"
 git remote remove origin 2>/dev/null || true
-git remote add origin "https://${GITHUB_TOKEN}@github.com/${GITHUB_USERNAME}/${REPO_NAME}.git"
+
+# Properly format the remote URL without shell variable expansion issues
+REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_TOKEN}@github.com/${GITHUB_USERNAME}/${REPO_NAME}.git"
+git remote add origin "$REMOTE_URL"
 echo "✅ Remote configured"
 echo ""
 
-echo "📋 Step 5: Check files"
-git status --short | head -20
-echo "..."
-echo ""
-
-echo "📋 Step 6: Stage all files"
+echo "📋 Step 5: Stage all files"
 git add .
 FILE_COUNT=$(git ls-files | wc -l)
 echo "✅ Staged $FILE_COUNT files"
 echo ""
 
-echo "📋 Step 7: Create commit"
+echo "📋 Step 6: Create commit"
 git commit -m "Initial commit: Kids Animation Pipeline - All phases complete
 
 - Phase 1: Story generation (Ollama LLM)
@@ -95,13 +92,13 @@ git commit -m "Initial commit: Kids Animation Pipeline - All phases complete
 echo "✅ Commit created"
 echo ""
 
-echo "📋 Step 8: Set main branch"
+echo "📋 Step 7: Set main branch"
 git branch -M main
 echo "✅ Branch set to main"
 echo ""
 
-echo "📋 Step 9: Push to GitHub"
-git push -u origin main
+echo "📋 Step 8: Push to GitHub"
+git push -u origin main 2>&1 | grep -v "remote:"
 echo "✅ Code pushed to GitHub!"
 echo ""
 
