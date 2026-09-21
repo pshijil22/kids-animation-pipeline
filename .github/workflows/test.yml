@@ -20,8 +20,7 @@ jobs:
           --health-cmd "curl -f http://localhost:11434/api/tags || exit 1"
           --health-interval 30s
           --health-timeout 10s
-          --health-retries 10
-          --start-period 60s
+          --health-retries 20
     
     steps:
     - uses: actions/checkout@v4
@@ -44,13 +43,13 @@ jobs:
     - name: Wait for Ollama to be ready
       run: |
         echo "Waiting for Ollama service to be fully ready..."
-        for i in {1..60}; do
+        for i in {1..120}; do
           if curl -f http://localhost:11434/api/tags 2>/dev/null; then
             echo "✅ Ollama is ready"
             break
           fi
-          echo "Attempt $i/60: Waiting for Ollama..."
-          sleep 2
+          echo "Attempt $i/120: Waiting for Ollama..."
+          sleep 1
         done
     
     - name: Pull Ollama model
