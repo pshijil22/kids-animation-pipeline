@@ -34,7 +34,7 @@ services:
       - GENERATE_ONLY=${GENERATE_ONLY:-true}
     volumes:
       - ./worker:/app
-      - ./data:/data
+      - C:/Users/pshij/Downloads/default:/data
       - ./prompts:/app/prompts
       - ./credentials:/app/credentials
     restart: unless-stopped

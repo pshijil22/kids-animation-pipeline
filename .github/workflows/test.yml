@@ -18,15 +18,16 @@ jobs:
           - 11434:11434
         options: >-
           --health-cmd "curl -f http://localhost:11434/api/tags || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 10
+          --start-period 60s
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
@@ -40,9 +41,23 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r worker/requirements.txt
     
+    - name: Wait for Ollama to be ready
+      run: |
+        echo "Waiting for Ollama service to be fully ready..."
+        for i in {1..60}; do
+          if curl -f http://localhost:11434/api/tags 2>/dev/null; then
+            echo "✅ Ollama is ready"
+            break
+          fi
+          echo "Attempt $i/60: Waiting for Ollama..."
+          sleep 2
+        done
+    
     - name: Pull Ollama model
       run: |
-        docker exec $(docker ps -q -f "ancestor=ollama/ollama") ollama pull llama3.2:3b
+        echo "Pulling llama3.2:3b model..."
+        curl -X POST http://localhost:11434/api/pull -d '{"name":"llama3.2:3b"}' -v || true
+        sleep 10
       continue-on-error: true
     
     - name: Lint Python code
@@ -75,9 +90,10 @@ jobs:
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results
         path: |
           worker/
           *.md
+        retention-days: 30

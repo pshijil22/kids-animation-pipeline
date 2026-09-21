@@ -25,15 +25,16 @@ jobs:
           --health-cmd "curl -f http://localhost:11434/api/tags || exit 1"
           --health-interval 30s
           --health-timeout 10s
-          --health-retries 5
+          --health-retries 10
+          --start-period 60s
         volumes:
           - ollama-data:/root/.ollama
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
     
@@ -54,16 +55,16 @@ jobs:
         mkdir -p data/scenes
         mkdir -p data/videos
     
-    - name: Wait for Ollama
+    - name: Wait for Ollama to be ready
       run: |
         echo "Waiting for Ollama service..."
         for i in {1..60}; do
-          if curl -f http://localhost:11434/api/tags; then
+          if curl -f http://localhost:11434/api/tags 2>/dev/null; then
             echo "✅ Ollama is ready"
             break
           fi
-          echo "Waiting... ($i/60)"
-          sleep 5
+          echo "Attempt $i/60: Waiting for Ollama..."
+          sleep 2
         done
     
     - name: Pull Ollama model
@@ -126,7 +127,7 @@ except Exception as e:
     
     - name: Upload videos
       if: success()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: videos-${{ github.run_id }}
         path: data/videos/
@@ -134,7 +135,7 @@ except Exception as e:
     
     - name: Upload stories
       if: success()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: stories-${{ github.run_id }}
         path: data/stories/
@@ -142,7 +143,7 @@ except Exception as e:
     
     - name: Upload audio
       if: success()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: audio-${{ github.run_id }}
         path: data/audio/
