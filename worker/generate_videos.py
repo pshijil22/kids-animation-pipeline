@@ -16,7 +16,7 @@ async def main():
     print(f"Generating video {batch_num} of {total_count}...")
     
     try:
-        result = asyncio.run(generate_story())
+        result = await generate_story()
         
         log = {
             'batch': batch_num,
