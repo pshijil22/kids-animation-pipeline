@@ -46,7 +46,7 @@ async def create_video(story: dict, audio_data: dict, scene_data: dict, job_id: 
         # Output file
         video_file = VIDEOS_DIR / f"{job_id}.mp4"
         
-        # Create concat file for image sequence
+        # Create concat file for image sequence with absolute paths
         concat_file = VIDEOS_DIR / f"{job_id}_concat.txt"
         duration_per_scene = total_duration / len(scene_images)
         
@@ -54,22 +54,28 @@ async def create_video(story: dict, audio_data: dict, scene_data: dict, job_id: 
         
         with open(concat_file, 'w') as f:
             for scene in scene_images:
-                f.write(f"file '{scene['path']}'\n")
+                # Use absolute path for concat file
+                abs_path = Path(scene['path']).resolve()
+                f.write(f"file '{abs_path}'\n")
                 f.write(f"duration {duration_per_scene:.2f}\n")
             # Repeat last image to fill remaining time
-            f.write(f"file '{scene_images[-1]['path']}'\n")
+            abs_last_path = Path(scene_images[-1]['path']).resolve()
+            f.write(f"file '{abs_last_path}'\n")
         
         logger.info(f"Concat file created: {concat_file}")
         
         # FFmpeg command: images + audio + subtitles → MP4
+        narration_abs = Path(narration_file).resolve()
+        subtitles_abs = Path(subtitles_file).resolve()
+        
         cmd = [
             "ffmpeg",
             "-y",  # Overwrite output
             "-f", "concat",
             "-safe", "0",
             "-i", str(concat_file),  # Image sequence
-            "-i", str(narration_file),  # Audio
-            "-vf", f"subtitles={subtitles_file}:force_style='Fontsize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000FF'",  # Subtitles
+            "-i", str(narration_abs),  # Audio
+            "-vf", f"subtitles={subtitles_abs}:force_style='Fontsize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000FF'",  # Subtitles
             "-c:v", "libx264",  # H.264 codec
             "-preset", "medium",  # Compression (fast/medium/slow)
             "-b:v", VIDEO_BITRATE,  # Video bitrate
