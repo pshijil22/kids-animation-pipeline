@@ -11,7 +11,6 @@ import random
 logger = logging.getLogger(__name__)
 
 SCENES_DIR = Path("/data/scenes")
-SCENES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Simple color palette for scenes
 COLORS = {
@@ -38,8 +37,10 @@ async def generate_scenes(story: dict, job_id: str) -> dict:
         dict: Contains scene_images list with paths
     """
     
+    # Create scenes directory on first use
+    SCENES_DIR.mkdir(parents=True, exist_ok=True)
+    
     logger.info(f"Generating scene images for job {job_id}")
-    scene_images = []
     
     for i, scene in enumerate(story.get('scenes', []), 1):
         scene_num = scene.get('number', i)

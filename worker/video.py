@@ -9,7 +9,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 VIDEOS_DIR = Path("/data/videos")
-VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Video settings from environment
 VIDEO_WIDTH = int(os.getenv('VIDEO_WIDTH', 1280))
@@ -31,6 +30,9 @@ async def create_video(story: dict, audio_data: dict, scene_data: dict, job_id: 
     Returns:
         dict: Contains video_file path and metadata
     """
+    
+    # Create videos directory on first use
+    VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Creating video for job {job_id}")
     
