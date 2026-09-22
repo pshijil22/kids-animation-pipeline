@@ -34,10 +34,6 @@ async def upload_to_youtube(video_file: str, metadata: dict) -> dict:
     # Create credentials directory on first use
     CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     
-    Returns:
-        dict: Contains video_id and upload status
-    """
-    
     logger.info(f"YouTube upload starting for: {metadata['title']}")
     
     # Check if uploads are enabled
