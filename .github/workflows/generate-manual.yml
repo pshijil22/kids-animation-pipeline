@@ -89,12 +89,21 @@ jobs:
         echo "### Generated Files:" >> $GITHUB_STEP_SUMMARY
         ls -lh data/videos/ 2>/dev/null | tail -5 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
     
+    - name: Check generated files
+      if: always()
+      run: |
+        echo "=== Listing data directory ==="
+        find ./data -type f 2>/dev/null | head -20
+        echo ""
+        echo "=== Video files ==="
+        ls -lh ./data/videos/ 2>/dev/null || echo "No videos directory"
+    
     - name: Upload videos
       if: success()
       uses: actions/upload-artifact@v4
       with:
         name: videos-${{ github.run_id }}
-        path: data/videos/
+        path: ${{ github.workspace }}/data/videos/
         retention-days: 30
     
     - name: Upload stories
@@ -102,7 +111,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: stories-${{ github.run_id }}
-        path: data/stories/
+        path: ${{ github.workspace }}/data/stories/
         retention-days: 30
     
     - name: Upload audio
@@ -110,7 +119,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: audio-${{ github.run_id }}
-        path: data/audio/
+        path: ${{ github.workspace }}/data/audio/
         retention-days: 30
     
     - name: Create release (optional)
