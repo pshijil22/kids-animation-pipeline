@@ -66,18 +66,14 @@ jobs:
         curl -X POST http://localhost:11434/api/pull -d "{\"name\":\"$MODEL\"}"
         sleep 30
     
+    - name: Set environment variables
+      run: |
+        echo "OLLAMA_URL=http://localhost:11434" >> $GITHUB_ENV
+        echo "OLLAMA_MODEL=${{ github.event.inputs.model || 'llama3.2:3b' }}" >> $GITHUB_ENV
+    
     - name: Generate videos
       run: |
-        cd worker
-        export OLLAMA_URL=http://localhost:11434
-        export OLLAMA_MODEL=${{ github.event.inputs.model || 'llama3.2:3b' }}
-        COUNT=${{ github.event.inputs.count || '1' }}
-        for i in $(seq 1 $COUNT); do
-          echo "Generating video $i of $COUNT..."
-          python generate_videos.py "$i" "$COUNT"
-          echo "Waiting 30 seconds before next generation..."
-          sleep 30
-        done
+        python generate_all_videos.py ${{ github.event.inputs.count || '1' }}
     
     - name: Generate summary
       if: always()
