@@ -10,7 +10,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-AUDIO_DIR = Path("/data/audio")
+AUDIO_DIR = Path("./data/audio")
 
 async def generate_narration_from_story(story: dict, job_id: str) -> dict:
     """

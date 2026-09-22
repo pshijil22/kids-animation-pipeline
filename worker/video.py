@@ -8,7 +8,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-VIDEOS_DIR = Path("/data/videos")
+VIDEOS_DIR = Path("./data/videos")
 
 # Video settings from environment
 VIDEO_WIDTH = int(os.getenv('VIDEO_WIDTH', 1280))

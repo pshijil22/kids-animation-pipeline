@@ -13,7 +13,7 @@ from googleapiclient.http import MediaFileUpload
 
 logger = logging.getLogger(__name__)
 
-CREDENTIALS_DIR = Path("/app/credentials")
+CREDENTIALS_DIR = Path("./credentials")
 
 # YouTube API scope
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
