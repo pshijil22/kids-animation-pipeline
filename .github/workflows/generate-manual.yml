@@ -117,17 +117,3 @@ jobs:
         name: audio-${{ github.run_id }}
         path: ${{ github.workspace }}/data/audio/
         retention-days: 30
-    
-    - name: Create release (optional)
-      if: success()
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: video-${{ github.run_id }}
-        release_name: Generated Videos Run ${{ github.run_id }}
-        body: |
-          Generated ${{ github.event.inputs.count || '1' }} videos
-          Model: ${{ github.event.inputs.model || 'llama3.2:3b' }}
-        draft: false
-        prerelease: false
