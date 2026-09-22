@@ -10,7 +10,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-AUDIO_DIR = Path("./data/audio")
+# Use environment variable for data directory or default to ./data
+DATA_DIR = Path(os.getenv('DATA_DIR', './data'))
+AUDIO_DIR = DATA_DIR / 'audio'
 
 async def generate_narration_from_story(story: dict, job_id: str) -> dict:
     """

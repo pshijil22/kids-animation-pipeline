@@ -10,7 +10,9 @@ import random
 
 logger = logging.getLogger(__name__)
 
-SCENES_DIR = Path("./data/scenes")
+# Use environment variable for data directory or default to ./data
+DATA_DIR = Path(os.getenv('DATA_DIR', './data'))
+SCENES_DIR = DATA_DIR / 'scenes'
 
 # Simple color palette for scenes
 COLORS = {

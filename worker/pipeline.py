@@ -42,7 +42,7 @@ async def generate_story():
     
     # Step 3: Save story to disk
     logger.info("Step 3: Saving story to disk")
-    story_dir = Path("./data/stories")
+    story_dir = Path(os.getenv('DATA_DIR', './data')) / 'stories'
     story_dir.mkdir(parents=True, exist_ok=True)
     
     story_file = story_dir / f"{job_id}_story.json"
