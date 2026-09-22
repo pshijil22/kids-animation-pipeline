@@ -166,18 +166,18 @@ def combine_audio_files(scene_files: list, output_file: str) -> None:
         logger.warning("No scene files to combine")
         return
     
-    # Create concat demuxer file for ffmpeg
+    # Create concat demuxer file for ffmpeg with absolute paths
     concat_file = Path(output_file).parent / f"{Path(output_file).stem}_concat.txt"
     
     with open(concat_file, 'w') as f:
         for scene in scene_files:
-            # Escape file path for concat demuxer
-            file_path = scene['path'].replace("'", "'\\''")
-            f.write(f"file '{file_path}'\n")
+            # Use absolute path
+            abs_path = Path(scene['path']).resolve()
+            f.write(f"file '{abs_path}'\n")
     
     try:
         # Use ffmpeg concat demuxer to combine files
-        subprocess.run(
+        result = subprocess.run(
             [
                 "ffmpeg",
                 "-f", "concat",
@@ -188,8 +188,12 @@ def combine_audio_files(scene_files: list, output_file: str) -> None:
             ],
             capture_output=True,
             timeout=60,
-            check=True
+            text=True
         )
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg concat stderr: {result.stderr}")
+            raise Exception(f"FFmpeg failed: {result.stderr}")
         
         logger.info(f"Audio files combined: {output_file}")
         
