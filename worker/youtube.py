@@ -14,7 +14,6 @@ from googleapiclient.http import MediaFileUpload
 logger = logging.getLogger(__name__)
 
 CREDENTIALS_DIR = Path("/app/credentials")
-CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
 
 # YouTube API scope
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
@@ -27,6 +26,13 @@ async def upload_to_youtube(video_file: str, metadata: dict) -> dict:
     Args:
         video_file: Path to MP4 file
         metadata: Video metadata (title, description, tags, etc.)
+    
+    Returns:
+        dict: Upload result with video_id and status
+    """
+    
+    # Create credentials directory on first use
+    CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
     
     Returns:
         dict: Contains video_id and upload status

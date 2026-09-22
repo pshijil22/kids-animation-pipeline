@@ -41,6 +41,7 @@ async def generate_scenes(story: dict, job_id: str) -> dict:
     SCENES_DIR.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Generating scene images for job {job_id}")
+    scene_images = []
     
     for i, scene in enumerate(story.get('scenes', []), 1):
         scene_num = scene.get('number', i)
