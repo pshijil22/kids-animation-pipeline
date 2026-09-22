@@ -47,8 +47,22 @@ async def generate_story_with_llm(max_retries=3):
     # Wait for Ollama to be ready
     await wait_for_ollama()
     
-    # Load the prompt
-    prompt_file = Path("/app/prompts/story.txt")
+    # Load the prompt - try multiple paths
+    prompt_paths = [
+        Path("/app/prompts/story.txt"),
+        Path("./prompts/story.txt"),
+        Path("../prompts/story.txt"),
+    ]
+    
+    prompt_file = None
+    for path in prompt_paths:
+        if path.exists():
+            prompt_file = path
+            break
+    
+    if not prompt_file:
+        raise FileNotFoundError(f"Prompt file not found. Checked: {[str(p) for p in prompt_paths]}")
+    
     with open(prompt_file, 'r') as f:
         prompt = f.read()
     
