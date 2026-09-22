@@ -72,37 +72,9 @@ jobs:
         export OLLAMA_URL=http://localhost:11434
         export OLLAMA_MODEL=${{ github.event.inputs.model || 'llama3.2:3b' }}
         COUNT=${{ github.event.inputs.count || '1' }}
-        
         for i in $(seq 1 $COUNT); do
           echo "Generating video $i of $COUNT..."
-          python -c "
-import asyncio
-from pipeline import generate_story
-import json
-import datetime
-
-try:
-    result = asyncio.run(generate_story())
-    
-    log = {
-        'batch': '$i',
-        'timestamp': datetime.datetime.now().isoformat(),
-        'status': 'success',
-        'job_id': result.get('job_id'),
-        'title': result.get('title'),
-        'video_file': result.get('video_file'),
-        'duration': result.get('total_duration')
-    }
-    
-    print('✅ Video $i generated!')
-    print(json.dumps(log, indent=2))
-    
-except Exception as e:
-    print(f'❌ Generation $i failed: {e}')
-    import traceback
-    traceback.print_exc()
-    exit(1)
-          "
+          python generate_videos.py "$i" "$COUNT"
           echo "Waiting 30 seconds before next generation..."
           sleep 30
         done
