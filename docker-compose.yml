@@ -1,3 +1,5 @@
+version: '3.9'
+
 services:
   # Ollama LLM Backend
   ollama:
@@ -11,42 +13,87 @@ services:
       - OLLAMA_HOST=0.0.0.0:11434
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-c", "test -f /root/.ollama/id_ed25519 && echo 'ok'"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
       retries: 5
-      start_period: 10s
+    # Uncomment for GPU support (NVIDIA):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
-  # Python Worker - Story Generation, TTS, Video Processing
+  # Python Worker - High-Quality Video Generation
   worker:
     build: ./worker
     container_name: kids-channel-worker
     ports:
       - "8000:8000"
     environment:
+      # Core settings
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
       - WORKER_PORT=8000
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - VIDEO_WIDTH=${VIDEO_WIDTH:-1280}
-      - VIDEO_HEIGHT=${VIDEO_HEIGHT:-720}
-      - VIDEO_FPS=${VIDEO_FPS:-30}
+      
+      # Video settings (1080p for YouTube)
+      - VIDEO_WIDTH=1920
+      - VIDEO_HEIGHT=1080
+      - VIDEO_FPS=30
+      
+      # AI/Quality settings
+      - SD_MODEL_ID=${SD_MODEL_ID:-runwayml/stable-diffusion-v1-5}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+      - GCP_CREDENTIALS=${GCP_CREDENTIALS:-}
+      - GCP_VOICE_NAME=${GCP_VOICE_NAME:-en-US-Neural2-C}
+      
+      # Generation mode
       - GENERATE_ONLY=${GENERATE_ONLY:-true}
+      
+      # YouTube (optional)
+      - YOUTUBE_CLIENT_ID=${YOUTUBE_CLIENT_ID:-}
+      - YOUTUBE_CLIENT_SECRET=${YOUTUBE_CLIENT_SECRET:-}
+      
+      # Music (optional)
+      - MUSIC_FILE=${MUSIC_FILE:-}
+      - MUSIC_VOLUME=0.3
+      - NARRATION_VOLUME=1.0
+    
     volumes:
       - ./worker:/app
-      - C:/Users/pshij/Downloads/default:/data
+      - ./data:/data
       - ./prompts:/app/prompts
       - ./credentials:/app/credentials
-    restart: unless-stopped
+    
     depends_on:
       ollama:
         condition: service_healthy
+    
+    restart: unless-stopped
+    
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 30s
+    
+    # GPU support for Stable Diffusion (NVIDIA):
+    # Uncomment to enable:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
 volumes:
   ollama_data:
+
+networks:
+  default:
+    name: kids-channel-network
