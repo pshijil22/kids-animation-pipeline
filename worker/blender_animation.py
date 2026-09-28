@@ -64,19 +64,21 @@ async def create_animated_video(story: dict, audio_data: dict, scene_data: dict,
                 "-i", scene['path']
             ])
         
+        # Add audio input
+        cmd.extend(["-i", str(narration_file)])
+        
         # Concat filter: concatenate all video inputs
         n_scenes = len(scene_images)
         concat_filter = "".join([f"[{i}:v]" for i in range(n_scenes)]) + f"concat=n={n_scenes}:v=1:a=0[v]"
         
-        # Add audio input
-        cmd.extend(["-i", str(narration_file)])
+        # Add subtitles filter to the concat output
+        full_filter = concat_filter + f",subtitles={subtitles_file}:force_style='Fontsize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000FF'[vout]"
         
         # Build final command
         cmd.extend([
-            "-filter_complex", concat_filter,
-            "-map", "[v]",
+            "-filter_complex", full_filter,
+            "-map", "[vout]",
             "-map", str(n_scenes) + ":a:0",
-            "-vf", f"subtitles={subtitles_file}:force_style='Fontsize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000FF'",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
