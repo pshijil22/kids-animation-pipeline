@@ -173,8 +173,8 @@ jobs:
       with:
         name: sample-animation-video
         path: |
-          data/videos/ci-sample.mp4
-          data/scenes/ci-sample_scene_*.png
+          worker/data/videos/ci-sample.mp4
+          worker/data/scenes/ci-sample_scene_*.png
         if-no-files-found: warn
         retention-days: 30
 
