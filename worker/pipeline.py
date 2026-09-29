@@ -1,93 +1,75 @@
 """
-Main orchestration logic for YouTube-quality video generation pipeline
-Optimized for GitHub Actions: Fast, no GPU required
-Flow: Story → High-quality Scenes → Professional Audio → Animated Video
+Single orchestration entry point for the automated kids animation pipeline.
+
+Flow: story acts -> narration -> 2D scenes -> animated MP4 -> optional YouTube upload.
 """
-import os
-import json
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
-# Import modules
 from story import generate_story_with_llm, validate_story_json
-from scenes import generate_scenes
+from blender_animation import generate_scenes, create_animated_video
 from tts import generate_narration_from_story
-from blender_animation import create_animated_video
 from youtube import upload_to_youtube
 
-# Use environment variable for data directory
-DATA_DIR = Path(os.getenv('DATA_DIR', './data'))
+logger = logging.getLogger(__name__)
+DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 
 
 async def generate_story():
-    """
-    Main pipeline: Generate YouTube-quality animated video
-    Optimized for GitHub Actions (fast, no GPU needed)
-    
-    Flow:
-    1. Generate story with Ollama LLM
-    2. Generate colorful Pillow scenes (fast, no SD needed)
-    3. Generate narration with eSpeak (free, fast)
-    4. Create animated video with Ken Burns effects
-    5. Upload to YouTube (optional)
-    
-    Returns:
-        dict: The generated story with video metadata
-    """
-    
     job_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger.info(f"Starting YouTube-quality video generation job: {job_id}")
-    
-    # Step 1: Generate story
-    logger.info("Step 1: Generating story with Ollama LLM...")
-    raw_story_text = await generate_story_with_llm()
-    story = validate_story_json(raw_story_text)
-    logger.info(f"Story: '{story['title']}'")
-    
-    # Save story
-    story_dir = DATA_DIR / 'stories'
+    logger.info("Starting episode build: %s", job_id)
+
+    logger.info("1/4 Generating five-act story...")
+    story = validate_story_json(await generate_story_with_llm())
+
+    story_dir = DATA_DIR / "stories"
     story_dir.mkdir(parents=True, exist_ok=True)
     story_file = story_dir / f"{job_id}_story.json"
-    with open(story_file, 'w') as f:
-        json.dump(story, f, indent=2)
-    
-    # Step 2: Generate colorful scenes (fast)
-    logger.info("Step 2: Generating colorful animated scenes...")
+    story_file.write_text(json.dumps(story, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    logger.info("2/4 Generating 100 illustrated scenes...")
     scene_data = await generate_scenes(story, job_id)
-    logger.info(f"Scenes: {len(scene_data['scene_images'])} generated")
-    
-    # Step 3: Generate narration
-    logger.info("Step 3: Generating narration audio...")
+
+    logger.info("3/4 Generating narration...")
     audio_data = await generate_narration_from_story(story, job_id)
-    logger.info(f"Narration: {audio_data['total_duration']:.1f}s")
-    
-    # Step 4: Create animated video
-    logger.info("Step 4: Creating animated video with Ken Burns effects...")
+    logger.info("Narration duration: %.1fs", audio_data["total_duration"])
+
+    logger.info("4/4 Rendering final 1080p episode...")
     video_data = await create_animated_video(story, audio_data, scene_data, job_id)
-    logger.info(f"Video: {video_data['resolution']} @ {video_data['fps']} FPS")
-    
-    # Step 5: YouTube upload is opt-in. The automatic build only creates the MP4.
-    logger.info("Step 5: YouTube upload skipped; episode is ready as an artifact.")
-    youtube_result = {'status': 'not_uploaded', 'reason': 'Automatic builds never publish videos.'}
-    
-    # Compile final metadata
-    story['job_id'] = job_id
-    story['story_file'] = str(story_file)
-    story['narration_file'] = audio_data['narration_file']
-    story['subtitles_file'] = audio_data['subtitles_file']
-    story['video_file'] = video_data['video_file']
-    story['video_resolution'] = video_data['resolution']
-    story['video_fps'] = video_data['fps']
-    story['total_duration'] = audio_data['total_duration']
-    story['video_size_bytes'] = video_data['size_bytes']
-    story['youtube_result'] = youtube_result
-    story['quality_level'] = 'youtube_ready'
-    
-    logger.info(f"✅ COMPLETE: {story['title']}")
-    logger.info(f"   Video: {video_data['size_bytes'] / 1024 / 1024:.1f}MB, {video_data['resolution']}")
-    
+
+    upload_enabled = os.getenv("YOUTUBE_UPLOAD", "false").lower() == "true"
+    if upload_enabled:
+        youtube_result = await upload_to_youtube(
+            video_data["video_file"],
+            {
+                **story,
+                "privacy_status": os.getenv("YOUTUBE_PRIVACY", "private"),
+            },
+        )
+    else:
+        youtube_result = {
+            "status": "not_uploaded",
+            "reason": "YOUTUBE_UPLOAD is not enabled.",
+        }
+
+    story.update(
+        {
+            "job_id": job_id,
+            "story_file": str(story_file),
+            "narration_file": audio_data["narration_file"],
+            "subtitles_file": audio_data["subtitles_file"],
+            "video_file": video_data["video_file"],
+            "video_resolution": video_data["resolution"],
+            "video_fps": video_data["fps"],
+            "total_duration": audio_data["total_duration"],
+            "video_size_bytes": video_data["size_bytes"],
+            "youtube_result": youtube_result,
+            "quality_level": "youtube_ready",
+        }
+    )
+    logger.info("COMPLETE: %s", story["title"])
     return story
