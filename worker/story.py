@@ -13,14 +13,14 @@ from pathlib import Path
 import requests
 
 logger = logging.getLogger(__name__)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 MIN_SECONDS = 1500
 MAX_SECONDS = 1800
 SCENES_PER_ACT = 20
 
 
-async def wait_for_ollama(max_retries=60, delay=1):
+async def wait_for_ollama(max_retries=180, delay=1):
     for attempt in range(max_retries):
         try:
             if requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).status_code == 200:
