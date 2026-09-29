@@ -223,6 +223,7 @@ jobs:
         VIDEO_FPS: 30
         VIDEO_CRF: 18
         VIDEO_PRESET: slow
+        GENERATE_ONLY: 'true'
       run: |
         cd worker
         python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
