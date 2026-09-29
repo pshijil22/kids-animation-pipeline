@@ -7,11 +7,11 @@ from pathlib import Path
 logger=logging.getLogger(__name__)
 DATA_DIR=Path(os.getenv("DATA_DIR","./data"))
 VIDEOS_DIR=DATA_DIR/"videos"
-VIDEO_WIDTH=int(os.getenv("VIDEO_WIDTH","1280"))
-VIDEO_HEIGHT=int(os.getenv("VIDEO_HEIGHT","720"))
+VIDEO_WIDTH=int(os.getenv("VIDEO_WIDTH","1920"))
+VIDEO_HEIGHT=int(os.getenv("VIDEO_HEIGHT","1080"))
 VIDEO_FPS=int(os.getenv("VIDEO_FPS","30"))
-VIDEO_CRF=os.getenv("VIDEO_CRF","19")
-VIDEO_PRESET=os.getenv("VIDEO_PRESET","medium")
+VIDEO_CRF=os.getenv("VIDEO_CRF","18")
+VIDEO_PRESET=os.getenv("VIDEO_PRESET","slow")
 
 
 def _scene_durations(story,audio_data,scene_images):
@@ -21,8 +21,8 @@ def _scene_durations(story,audio_data,scene_images):
     durations=[max(2.0,by_num.get(int(s.get("number",i+1)),fallback)) for i,s in enumerate(scene_images)]
     target=float(story.get("target_duration_seconds",story.get("duration_seconds",0)) or 0)
     total=sum(durations)
-    if target >= 600 and not 570 <= total <= 750:
-        raise ValueError(f"Long-form episode duration is {total:.1f}s; expected roughly 10-12 minutes")
+    if target >= 720 and not 690 <= total <= 930:
+        raise ValueError(f"Long-form episode duration is {total:.1f}s; expected roughly 12-15 minutes")
     return durations
 
 
@@ -77,7 +77,7 @@ async def create_animated_video(story,audio_data,scene_data,job_id):
          "-map","[vout]","-map",f"{len(images)}:a:0","-c:v","libx264","-preset",VIDEO_PRESET,
          "-crf",VIDEO_CRF,"-tune","animation","-c:a","aac","-b:a","160k","-ar","48000",
          "-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(output)]
-    result=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
+    result=subprocess.run(cmd,capture_output=True,text=True,timeout=3600)
     if result.returncode!=0:
         logger.error(result.stderr[-4000:])
         raise RuntimeError("FFmpeg animation render failed")
