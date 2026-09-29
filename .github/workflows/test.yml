@@ -1,4 +1,4 @@
-name: Build Full Kids Animation Episode
+name: Build Kids Animation Episode
 
 on:
   push:
@@ -6,13 +6,13 @@ on:
       - '**'
 
 concurrency:
-  group: kids-animation-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-render:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     services:
       ollama:
         image: ollama/ollama:latest
@@ -28,42 +28,31 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y espeak-ng ffmpeg curl
-
-      - name: Install Python dependencies
-        run: |
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
           pip install flake8
 
-      - name: Wait for Ollama
+      - name: Start Ollama model
         run: |
           for i in {1..180}; do
-            if curl -sf http://localhost:11434/api/tags >/dev/null; then
-              echo 'Ollama ready'
-              exit 0
-            fi
+            curl -sf http://localhost:11434/api/tags >/dev/null && break
             sleep 1
           done
-          echo 'Ollama did not become ready'
-          exit 1
+          curl --fail --retry 5 --retry-delay 5 -X POST http://localhost:11434/api/pull \
+            -H 'Content-Type: application/json' -d '{"name":"llama3.2:3b"}'
 
-      - name: Pull story model
-        run: |
-          curl --fail --retry 5 --retry-delay 5 -X POST http://localhost:11434/api/pull -d '{"name":"llama3.2:3b"}'
-
-      - name: Validate code
+      - name: Validate pipeline
         run: |
           flake8 worker/*.py --count --select=E9,F63,F7,F82 --show-source --statistics
           cd worker
           python -m compileall -q .
-          python -c "from pipeline import generate_story; print('Pipeline import OK')"
-          python -c "from blender_animation import create_animated_video; print('Renderer import OK')"
+          python -c "from pipeline import generate_story; print('Pipeline OK')"
 
-      - name: Generate complete 12-15 minute episode
+      - name: Generate, render and optionally publish
         env:
           OLLAMA_URL: http://ollama:11434
           OLLAMA_MODEL: llama3.2:3b
@@ -73,25 +62,31 @@ jobs:
           VIDEO_FPS: 30
           VIDEO_CRF: 18
           VIDEO_PRESET: slow
+          YOUTUBE_UPLOAD: ${{ secrets.YOUTUBE_UPLOAD }}
+          YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
         run: |
           cd worker
           python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
 
-      - name: Verify final episode
+      - name: Final quality check
         run: |
           file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
           test -n "$file"
           duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
           width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
           height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
+          audio=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$file")
           echo "Episode: $file"
           echo "Duration: ${duration}s"
           echo "Resolution: ${width}x${height}"
-          python -c "d=float('$duration'); assert 690 <= d <= 930, f'Invalid duration: {d}s'"
+          echo "Audio: ${audio}"
+          python -c "d=float('$duration'); assert 1470 <= d <= 1830, f'Invalid duration: {d}s'"
           test "$width" = "1920"
           test "$height" = "1080"
+          test "$audio" = "aac"
 
-      - name: Upload finished episode
+      - name: Upload episode artifact
         uses: actions/upload-artifact@v4
         with:
           name: youtube-ready-episode
