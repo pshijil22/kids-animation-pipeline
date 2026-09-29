@@ -17,7 +17,7 @@ async def wait_for_ollama(max_retries=30,delay=1):
         if attempt<max_retries-1: await asyncio.sleep(delay)
     raise RuntimeError(f"Ollama not responding at {OLLAMA_URL}")
 
-async def generate_story_with_llm(max_retries=3):
+async def generate_story_with_llm(max_retries=1):
     await wait_for_ollama()
     prompt_paths=[Path("/app/prompts/story.txt"),Path("./prompts/story.txt"),Path("../prompts/story.txt")]
     prompt_file=next((p for p in prompt_paths if p.exists()),None)
