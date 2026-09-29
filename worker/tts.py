@@ -48,7 +48,7 @@ async def generate_narration_from_story(story: dict, job_id: str) -> dict:
                 [
                     "espeak-ng",
                     "-w", str(scene_audio_file),
-                    "-s", "150",
+                    "-s", "140",
                     "-p", "50",
                     "--",
                     narration_text[:500]  # Limit text length
