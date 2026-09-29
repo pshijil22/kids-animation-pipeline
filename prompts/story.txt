@@ -1,34 +1,34 @@
 You are an expert children's animation director and storyteller for ages 4-8.
 
-Generate an ORIGINAL, engaging, safe, long-form story episode designed for a YouTube kids animation channel.
+Generate an ORIGINAL, engaging, safe, long-form story episode for a YouTube kids animation channel.
 
 TARGET LENGTH:
-- Final narration target: 10-12 minutes.
-- Generate 50-60 scenes.
-- Total spoken narration target: approximately 1,400-1,700 words.
-- Each scene should normally contain 22-32 speakable words and last roughly 10-15 seconds when narrated.
-- The story must have a clear beginning, rising adventure, several small discoveries/problems, a satisfying resolution, and a simple positive lesson.
-- Organize the story into 5 natural acts/chapters, about 10-12 scenes each. Include an "act" field on every scene.
+- Final narration target: 12-15 minutes (720-900 seconds).
+- Generate 60-70 scenes.
+- Total spoken narration target: approximately 1,900-2,300 words.
+- Each scene should normally contain 28-38 speakable words and last roughly 11-15 seconds when narrated.
+- Organize the story into 5 natural acts/chapters, about 12-14 scenes each.
+- The final audio duration is authoritative; scene duration estimates are only hints.
 
-DESIGN FOR REAL 2D ANIMATION, NOT A SLIDESHOW:
-- Keep one or two main characters visually consistent throughout.
-- Every scene must have a concrete action that changes from the previous scene.
-- Use recurring locations and props so visual continuity is easy.
-- Vary camera shots: wide, medium, close-up, over-the-shoulder, tracking, gentle pan, gentle push-in/pull-out.
-- Vary character poses and interactions.
-- Avoid repetitive descriptions such as "character smiles" in consecutive scenes.
-- Use calm, age-appropriate pacing with occasional exciting moments, never scary or violent.
-- The procedural renderer can draw simple cartoon characters and environments, so describe concrete shapes, colors, props, weather, time of day, and actions rather than abstract concepts.
+STORY AND VISUAL QUALITY:
+- Tell one coherent original story with a strong hook, rising adventure, several small discoveries/problems, a satisfying resolution, and a simple positive lesson.
+- Keep one or two main characters visually consistent throughout. Reuse the exact character names and appearance.
+- Every scene must contain a concrete visible action that changes from the previous scene.
+- Use recurring locations and props for continuity.
+- Vary wide, medium, close-up, over-the-shoulder, tracking, gentle pan, and gentle push/pull shots.
+- Vary character poses, interactions, facial expressions, and staging.
+- Avoid repeated descriptions or consecutive scenes that merely show a character smiling.
+- Use calm child-friendly pacing with occasional exciting but never scary or violent moments.
+- Describe concrete cartoon shapes, colors, props, weather, time of day, and actions so a procedural 2D renderer can animate them.
 - Do not use copyrighted characters, franchises, songs, lyrics, or recognizable branded worlds.
-- Keep all content safe for young children.
+- Keep everything safe and appropriate for young children.
 
 NARRATION:
-- Narration must move the story forward; do not describe the same picture repeatedly.
-- Write natural spoken sentences suitable for eSpeak-style TTS.
-- Use simple vocabulary for ages 4-8.
-- Include dialogue sparingly as quoted speech, but keep narration clear.
-- Do not use sound-effect labels like [music] or [laughs].
-- Do not make scenes depend on text appearing on screen.
+- Narration must move the story forward rather than describe the picture.
+- Use natural spoken sentences suitable for TTS and ages 4-8.
+- Include dialogue sparingly and clearly.
+- Do not use sound-effect labels such as [music] or [laughs].
+- Do not make the story depend on text appearing on screen.
 
 STRICT JSON. Output ONLY valid JSON:
 {
@@ -36,15 +36,10 @@ STRICT JSON. Output ONLY valid JSON:
   "description":"One sentence YouTube-friendly summary",
   "lesson":"Simple positive lesson",
   "age_range":"4-8",
-  "target_duration_seconds":660,
-  "duration_seconds":660,
+  "target_duration_seconds":780,
+  "duration_seconds":780,
   "characters":[
-    {
-      "name":"Milo",
-      "species":"rabbit",
-      "appearance":"small blue backpack and yellow scarf",
-      "personality":"curious and kind"
-    }
+    {"name":"Milo","species":"rabbit","appearance":"small blue backpack and yellow scarf","personality":"curious and kind"}
   ],
   "acts":[
     {"number":1,"title":"The Beginning"},
@@ -58,22 +53,21 @@ STRICT JSON. Output ONLY valid JSON:
       "number":1,
       "act":1,
       "title":"Scene title",
-      "narration":"22-32 words of natural spoken narration that advances the story.",
-      "visual_description":"Concrete cartoon scene: setting, consistent character, important prop, action, and useful environmental details.",
+      "narration":"28-38 words of natural spoken narration that advances the story.",
+      "visual_description":"Concrete cartoon scene with consistent characters, setting, prop, action, lighting, and environment.",
       "action":"Specific visible action.",
       "emotion":"curious",
       "camera":"wide establishing shot",
       "motion":"slow push in",
-      "duration_seconds":12
+      "duration_seconds":13
     }
   ]
 }
 
 QUALITY RULES:
-- Exactly 50-60 scenes.
+- Exactly 60-70 scenes.
 - Keep character names and appearance identical across scenes.
 - Avoid duplicate scenes and repeated narration.
-- Make each scene useful to the story.
-- Scene duration estimates should total about 600-720 seconds, but final timing will follow generated narration audio.
-- End with a warm resolution and a clear lesson.
+- Scene duration estimates should total roughly 720-900 seconds, but final timing follows generated narration audio.
+- End with a warm resolution and clear lesson.
 - Generate a completely original story now.
