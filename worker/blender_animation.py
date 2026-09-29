@@ -23,7 +23,7 @@ def _scene_durations(story,audio_data,scene_images):
 
 def _subtitle_filter(path):
     # FFmpeg subtitles filter escaping for POSIX/Windows-ish paths.
-    value=str(Path(path).resolve()).replace("\","/").replace(":","\\:").replace("'","\\'")
+    value=str(Path(path).resolve()).replace(chr(92), "/").replace(":", "\\:").replace(chr(39), "\\'")
     return f"subtitles='{value}':force_style='FontName=DejaVu Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H001B1630,BorderStyle=3,Outline=2,Shadow=1,MarginV=34'"
 
 
