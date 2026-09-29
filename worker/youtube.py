@@ -8,6 +8,7 @@ import logging
 import os
 
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -23,6 +24,8 @@ async def upload_to_youtube(video_file: str, metadata: dict) -> dict:
     try:
         info = json.loads(token_json)
         credentials = Credentials.from_authorized_user_info(info, YOUTUBE_SCOPES)
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
         youtube = build("youtube", "v3", credentials=credentials)
 
         body = {
