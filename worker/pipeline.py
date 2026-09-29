@@ -70,16 +70,9 @@ async def generate_story():
     video_data = await create_animated_video(story, audio_data, scene_data, job_id)
     logger.info(f"Video: {video_data['resolution']} @ {video_data['fps']} FPS")
     
-    # Step 5: Upload to YouTube (optional)
-    logger.info("Step 5: YouTube upload (optional)...")
-    youtube_metadata = {
-        'title': story['title'],
-        'description': story['description'],
-        'tags': ['animation', 'children', 'educational'],
-        'privacy_status': 'private'
-    }
-    youtube_result = await upload_to_youtube(video_data['video_file'], youtube_metadata)
-    logger.info(f"YouTube: {youtube_result['status']}")
+    # Step 5: YouTube upload is opt-in. The automatic build only creates the MP4.
+    logger.info("Step 5: YouTube upload skipped; episode is ready as an artifact.")
+    youtube_result = {'status': 'not_uploaded', 'reason': 'Automatic builds never publish videos.'}
     
     # Compile final metadata
     story['job_id'] = job_id
