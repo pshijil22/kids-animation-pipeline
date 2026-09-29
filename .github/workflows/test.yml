@@ -84,23 +84,99 @@ jobs:
         test -f QUICK_START.md && echo "✅ QUICK_START.md exists"
         test -f FINAL_README.md && echo "✅ FINAL_README.md exists"
     
-    - name: Build sample animation
+    - name: Render sample animation
       if: success()
       run: |
         cd worker
         python - <<'PY'
         from pathlib import Path
-        from PIL import Image
+        import math
+        import struct
+        import wave
         import asyncio
         from scenes import generate_scenes
         from blender_animation import create_animated_video
-        data=Path("../data")
-        data.mkdir(exist_ok=True)
-        (data/"audio").mkdir(exist_ok=True)
-        Image.new("RGB",(1280,720),"#9DDCFF").save(data/"audio"/"dummy.png")
-        # Rendering is covered by import/compile checks; keep CI artifact generation lightweight.
-        print("Animation renderer loaded successfully; full generation runs in the application environment.")
+
+        data = Path("../data")
+        audio_dir = data / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        sample_wav = audio_dir / "ci_sample.wav"
+        sample_srt = audio_dir / "ci_sample.srt"
+        sample_rate = 22050
+        duration = 6.0
+        frames = int(sample_rate * duration)
+
+        # Deterministic synthetic narration track: a quiet tone keeps CI self-contained
+        # while exercising the real FFmpeg audio/video muxing path.
+        with wave.open(str(sample_wav), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            for n in range(frames):
+                value = int(1800 * math.sin(2 * math.pi * 440 * n / sample_rate))
+                wav.writeframes(struct.pack("<h", value))
+
+        sample_srt.write_text(
+            "1\n00:00:00,000 --> 00:00:03,000\n"
+            "Welcome to our little adventure!\n\n"
+            "2\n00:00:03,000 --> 00:00:06,000\n"
+            "Let's explore together!\n",
+            encoding="utf-8",
+        )
+
+        story = {
+            "title": "CI Sample Adventure",
+            "description": "A short deterministic render used to verify the animation pipeline.",
+            "duration_seconds": 6,
+            "scenes": [
+                {
+                    "number": 1,
+                    "visual_description": "A cheerful rabbit walks along a sunny forest path with flowers.",
+                    "action": "walking",
+                    "emotion": "happy",
+                    "camera": "wide",
+                    "motion": "slow push in",
+                },
+                {
+                    "number": 2,
+                    "visual_description": "A cheerful rabbit waves beside a tree in a bright garden.",
+                    "action": "waving",
+                    "emotion": "excited",
+                    "camera": "medium",
+                    "motion": "gentle pan",
+                },
+            ],
+        }
+        audio_data = {
+            "narration_file": str(sample_wav),
+            "subtitles_file": str(sample_srt),
+            "total_duration": duration,
+            "scene_narrations": [
+                {"scene_num": 1, "duration": 3.0},
+                {"scene_num": 2, "duration": 3.0},
+            ],
+        }
+
+        scene_data = asyncio.run(generate_scenes(story, "ci-sample"))
+        result = asyncio.run(
+            create_animated_video(story, audio_data, scene_data, "ci-sample")
+        )
+        output = Path(result["video_file"])
+        assert output.exists() and output.stat().st_size > 100_000, result
+        print(f"Generated sample video: {output} ({output.stat().st_size} bytes)")
         PY
+
+    - name: Upload generated animation
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sample-animation-video
+        path: |
+          data/videos/ci-sample.mp4
+          data/scenes/ci-sample_scene_*.png
+        if-no-files-found: warn
+        retention-days: 30
 
     - name: Upload test results
       if: always()
