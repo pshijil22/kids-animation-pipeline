@@ -121,10 +121,21 @@ For later acts return:
         logger.info("Generating story act %s/5...", act)
         result = await _ask_ollama(prompt)
         act_scenes = result.get("scenes", [])
-        if len(act_scenes) != SCENES_PER_ACT:
+        if len(act_scenes) < SCENES_PER_ACT:
             raise ValueError(
-                f"Act {act} must contain {SCENES_PER_ACT} scenes; received {len(act_scenes)}"
+                f"Act {act} must contain at least {SCENES_PER_ACT} scenes; received {len(act_scenes)}"
             )
+        if len(act_scenes) > SCENES_PER_ACT:
+            logger.warning(
+                "Act %s returned %s scenes; keeping the first %s to enforce the episode's 100-scene budget.",
+                act,
+                len(act_scenes),
+                SCENES_PER_ACT,
+            )
+            act_scenes = act_scenes[:SCENES_PER_ACT]
+        for scene in act_scenes:
+            if isinstance(scene, dict):
+                scene["act"] = act
         if act == 1:
             story = {
                 "title": result.get("title", "A New Adventure"),
