@@ -67,6 +67,8 @@ jobs:
         python -c "from story import generate_story_with_llm; print('✅ Story module OK')"
         python -c "from tts import generate_narration_from_story; print('✅ TTS module OK')"
         python -c "from scenes import generate_scenes; print('✅ Scenes module OK')"
+        python -c "from blender_animation import create_animated_video; print('✅ Animation compositor OK')"
+        python -m compileall -q worker
         python -c "from video import create_video; print('✅ Video module OK')"
         python -c "from youtube import upload_to_youtube; print('✅ YouTube module OK')"
     
