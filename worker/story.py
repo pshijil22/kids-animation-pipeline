@@ -18,6 +18,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 MIN_SECONDS = 1500
 MAX_SECONDS = 1800
 SCENES_PER_ACT = 20
+SCENES_PER_BATCH = 10
 
 
 async def wait_for_ollama(max_retries=180, delay=1):
@@ -50,7 +51,7 @@ def _extract_json(raw):
         return json.loads(match.group(0))
 
 
-async def _ask_ollama(prompt, timeout=1200):
+async def _ask_ollama(prompt, timeout=900):
     response = requests.post(
         f"{OLLAMA_URL}/api/generate",
         json={
@@ -77,30 +78,33 @@ async def generate_story_with_llm():
     characters = []
 
     for act in range(1, 6):
-        recent = scenes[-3:] if scenes else []
-        context = json.dumps(
-            {"characters": characters, "recent_scenes": recent, "next_act": act},
-            ensure_ascii=False,
-        )
-        prompt = f"""
+        for batch in range(2):
+            start_number = (act - 1) * SCENES_PER_ACT + batch * SCENES_PER_BATCH + 1
+            recent = scenes[-3:] if scenes else []
+            context = json.dumps(
+                {"characters": characters, "recent_scenes": recent, "next_act": act},
+                ensure_ascii=False,
+            )
+            prompt = f"""
 {base}
 
-You are generating ACT {act} of 5.
-Generate EXACTLY {SCENES_PER_ACT} scenes for this act.
+You are generating ACT {act} of 5, BATCH {batch + 1} of 2.
+Generate EXACTLY {SCENES_PER_BATCH} scenes in this batch.
 The complete episode must contain 100 scenes and 25-30 minutes of narration.
+This batch covers scene numbers {start_number} through {start_number + SCENES_PER_BATCH - 1}.
 
-Continuity context from earlier acts:
+Continuity context from earlier scenes:
 {context}
 
-For ACT 1, create the title, description, lesson, age_range, characters and acts.
-For ACTS 2-5, keep the same characters, setting, story premise and lesson.
+For ACT 1, BATCH 1, create the title, description, lesson, age_range, characters and acts.
+For all other batches, keep the same characters, setting, story premise and lesson.
 Do not rename characters or change their appearance.
 
 Each scene must contain 38-45 natural spoken words, a concrete visible action,
 and useful visual details. The scene duration target is about 15-18 seconds.
 Return ONLY valid JSON.
 
-For ACT 1 return:
+For ACT 1, BATCH 1 return:
 {{
   "title":"...",
   "description":"...",
@@ -110,45 +114,40 @@ For ACT 1 return:
   "duration_seconds":1650,
   "characters":[{{"name":"...","species":"...","appearance":"...","personality":"..."}}],
   "acts":[{{"number":1,"title":"..."}},{{"number":2,"title":"..."}},{{"number":3,"title":"..."}},{{"number":4,"title":"..."}},{{"number":5,"title":"..."}}],
-  "scenes":[{{"number":1,"act":1,"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
 }}
 
-For later acts return:
+For every other batch return:
 {{
-  "scenes":[{{"number":{(act-1)*SCENES_PER_ACT+1},"act":{act},"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
 }}
 """
-        logger.info("Generating story act %s/5...", act)
-        result = await _ask_ollama(prompt)
-        act_scenes = result.get("scenes", [])
-        if len(act_scenes) < SCENES_PER_ACT:
-            raise ValueError(
-                f"Act {act} must contain at least {SCENES_PER_ACT} scenes; received {len(act_scenes)}"
-            )
-        if len(act_scenes) > SCENES_PER_ACT:
-            logger.warning(
-                "Act %s returned %s scenes; keeping the first %s to enforce the episode's 100-scene budget.",
-                act,
-                len(act_scenes),
-                SCENES_PER_ACT,
-            )
-            act_scenes = act_scenes[:SCENES_PER_ACT]
-        for scene in act_scenes:
-            if isinstance(scene, dict):
-                scene["act"] = act
-        if act == 1:
-            story = {
-                "title": result.get("title", "A New Adventure"),
-                "description": result.get("description", "An original adventure for children."),
-                "lesson": result.get("lesson", "Kindness and teamwork help us solve problems."),
-                "age_range": result.get("age_range", "4-8"),
-                "target_duration_seconds": 1650,
-                "duration_seconds": 1650,
-                "characters": result.get("characters", []),
-                "acts": result.get("acts", []),
-            }
-            characters = story["characters"]
-        scenes.extend(act_scenes)
+            logger.info("Generating story act %s/5 batch %s/2...", act, batch + 1)
+            result = await _ask_ollama(prompt)
+            act_scenes = result.get("scenes", [])
+            if len(act_scenes) < SCENES_PER_BATCH:
+                raise ValueError(
+                    f"Act {act} batch {batch + 1} must contain at least "
+                    f"{SCENES_PER_BATCH} scenes; received {len(act_scenes)}"
+                )
+            act_scenes = act_scenes[:SCENES_PER_BATCH]
+            for offset, scene in enumerate(act_scenes):
+                if isinstance(scene, dict):
+                    scene["number"] = start_number + offset
+                    scene["act"] = act
+            if act == 1 and batch == 0:
+                story = {
+                    "title": result.get("title", "A New Adventure"),
+                    "description": result.get("description", "An original adventure for children."),
+                    "lesson": result.get("lesson", "Kindness and teamwork help us solve problems."),
+                    "age_range": result.get("age_range", "4-8"),
+                    "target_duration_seconds": 1650,
+                    "duration_seconds": 1650,
+                    "characters": result.get("characters", []),
+                    "acts": result.get("acts", []),
+                }
+                characters = story["characters"]
+            scenes.extend(act_scenes)
 
     story["scenes"] = scenes
     return json.dumps(story, ensure_ascii=False)
