@@ -18,7 +18,12 @@ def _scene_durations(story,audio_data,scene_images):
     actual=audio_data.get("scene_narrations") or []
     by_num={int(x.get("scene_num",i+1)):float(x.get("duration",0) or 0) for i,x in enumerate(actual)}
     fallback=float(audio_data.get("total_duration",story.get("duration_seconds",60)) or 60)/max(1,len(scene_images))
-    return [max(2.0,by_num.get(int(s.get("number",i+1)),fallback)) for i,s in enumerate(scene_images)]
+    durations=[max(2.0,by_num.get(int(s.get("number",i+1)),fallback)) for i,s in enumerate(scene_images)]
+    target=float(story.get("target_duration_seconds",story.get("duration_seconds",0)) or 0)
+    total=sum(durations)
+    if target >= 600 and not 570 <= total <= 750:
+        raise ValueError(f"Long-form episode duration is {total:.1f}s; expected roughly 10-12 minutes")
+    return durations
 
 
 def _subtitle_filter(path):
