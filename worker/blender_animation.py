@@ -1,5 +1,6 @@
 """Procedural 2D scene renderer and FFmpeg compositor for the kids animation pipeline."""
 import hashlib
+import json
 import logging
 import math
 import os
@@ -133,7 +134,7 @@ def _kind(text):
     return "bear"
 
 
-def _create_scene_image(scene):
+def _create_scene_image(scene, character_kind=None):
     description = (scene.get("visual_description") or "").strip()
     action = (scene.get("action") or "").strip()
     seed = _seed(scene)
@@ -182,7 +183,7 @@ def _create_scene_image(scene):
     direction = -1 if seed % 2 else 1
     cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
     ground = int(VIDEO_HEIGHT * 0.73)
-    _character(draw, cx, ground, _kind(description + " " + action), 1.15, 0)
+    _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
 
     for i in range(16):
         x = (seed * (i + 3) * 17) % VIDEO_WIDTH
@@ -195,11 +196,13 @@ def _create_scene_image(scene):
 async def generate_scenes(story: dict, job_id: str) -> dict:
     SCENES_DIR.mkdir(parents=True, exist_ok=True)
     scene_images = []
+    character_text = json.dumps(story.get("characters", []), ensure_ascii=False)
+    primary_kind = _kind(character_text)
     for i, scene in enumerate(story.get("scenes", []), 1):
         number = int(scene.get("number", i))
         path = SCENES_DIR / f"{job_id}_scene_{number:03d}.png"
         try:
-            _create_scene_image(scene).save(path, "PNG", optimize=True)
+            _create_scene_image(scene, primary_kind).save(path, "PNG", optimize=True)
         except Exception:
             logger.exception("Scene %s failed; creating fallback", number)
             Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), "#9DDCFF").save(path, "PNG")
