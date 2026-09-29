@@ -53,14 +53,14 @@ def repair_story_json(story):
     story.setdefault("age_range","4-8")
     if not isinstance(story.get("scenes"),list) or not story["scenes"]:
         raise ValueError("Story must have a non-empty scenes array")
-    story["duration_seconds"]=max(600,min(720,int(story.get("duration_seconds",660))))
-    story["target_duration_seconds"]=max(600,min(720,int(story.get("target_duration_seconds",story["duration_seconds"]))))
+    story["duration_seconds"]=max(720,min(900,int(story.get("duration_seconds",780))))
+    story["target_duration_seconds"]=max(720,min(900,int(story.get("target_duration_seconds",story["duration_seconds"]))))
     story.setdefault("characters",[])
     if not isinstance(story["characters"],list): story["characters"]=[]
-    if len(story["scenes"]) < 50:
-        raise ValueError(f"Long-form story needs at least 50 scenes; received {len(story['scenes'])}")
-    if len(story["scenes"]) > 60:
-        story["scenes"] = story["scenes"][:60]
+    if len(story["scenes"]) < 60:
+        raise ValueError(f"Long-form story needs at least 60 scenes; received {len(story['scenes'])}")
+    if len(story["scenes"]) > 70:
+        story["scenes"] = story["scenes"][:70]
     normalized=[]
     for i,scene in enumerate(story["scenes"],1):
         if not isinstance(scene,dict): scene={}
