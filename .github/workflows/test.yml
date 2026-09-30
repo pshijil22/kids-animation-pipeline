@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y espeak-ng ffmpeg curl
+          sudo apt-get install -y ffmpeg curl
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
           pip install flake8
