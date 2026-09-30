@@ -1,56 +1,37 @@
 # Kids Animation Pipeline
 
-Automated 25–30 minute kids-animation episode production.
+Automated 25–30 minute generative animated-movie production.
 
-## Pipeline
+Pipeline:
+Push to main -> GitHub Actions -> Ollama story generation -> neural narration -> generative cinematic video shots -> continuity-aware shot generation -> FFmpeg movie assembly -> 1080p H.264/AAC -> duration/resolution/audio QC -> artifact.
 
-```
-Push to main
-  -> GitHub Actions
-  -> Ollama story generation (100 scenes)
-  -> Neural narration (Edge TTS)
-  -> Layered 2D scene rendering
-  -> Character motion + camera movement
-  -> FFmpeg 1080p H.264/AAC episode
-  -> duration/resolution/audio quality checks
-  -> downloadable GitHub Actions artifact
-```
+## Production renderer
 
-Every push to `main` runs the production pipeline automatically. There is no manual workflow trigger.
+The production renderer uses a generative video model rather than procedural 2D drawings. Each scene is written as a film shot with location, time, character actions, props, emotion, camera direction and continuity. The generated movie keeps the same character/world bible in every prompt and feeds the previous shot's final frame into the next shot as a continuity anchor.
 
-## Current production files
+The current provider is Runway Dev's WAN 3.0 (wan3) at 720p, then the finished movie is delivered at 1920x1080. WAN 3.0 supports reference-driven video generation and 2–30 second shots.
 
-```
-.github/workflows/test.yml   # automated build
-prompts/story.txt            # story-generation prompt
-worker/pipeline.py            # orchestration
-worker/story.py               # 100-scene story generation
-worker/tts.py                 # neural narration
-worker/blender_animation.py   # layered 2D animation + cinematic rendering
-worker/youtube.py             # optional YouTube publishing
-worker/requirements.txt       # runtime dependencies
-.env.example                  # local configuration template
-```
+### Required GitHub secret
 
-Generated files under `data/` are ignored by Git.
+Add RUNWAYML_API_SECRET to the repository's GitHub Actions secrets. Do not put the API key in source code or .env files.
 
-## Episode target
+Every push to main runs automatically. No manual workflow trigger.
 
-- 100 scenes / 5 acts
-- 25–30 minutes
-- 1920×1080
-- 30 FPS
-- H.264 video + AAC audio
-- Neural English narration
-- Cinematic camera movement, character-layer motion, grading, grain and vignette
-- Original, child-safe stories
+Current production files:
+- .github/workflows/test.yml
+- prompts/story.txt
+- worker/pipeline.py
+- worker/story.py
+- worker/tts.py
+- worker/generative_video.py
+- worker/youtube.py
+- worker/requirements.txt
+- .env.example
 
-## YouTube
+The old procedural worker/blender_animation.py renderer has been removed.
 
-YouTube upload is **disabled by default**. The build only creates the episode artifact until publishing is explicitly enabled through GitHub repository secrets.
+Generated files under data/ are ignored by Git.
 
-## Development
+Episode target: 100 story scenes, 25–30 minutes, 1920x1080 delivery, 30 FPS, H.264/AAC, neural English narration, cinematic generated animation, scene continuity, expressive character motion, story-driven camera work and original child-safe stories.
 
-The repository intentionally keeps one production path: `main` + GitHub Actions. Legacy Docker/FastAPI/manual-generation files are not part of the production pipeline.
-
-For a build failure, inspect the failed GitHub Actions run and fix the source on `main`; the next push automatically starts a fresh build.
+YouTube upload is disabled by default.
