@@ -14,6 +14,7 @@ TARGET_SCENE_SECONDS = 16.5
 TTS_VOICE = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 TTS_RATE = os.getenv("TTS_RATE", "-5%")
 TTS_PITCH = os.getenv("TTS_PITCH", "+0Hz")
+REQUIRE_NEURAL_TTS = os.getenv("REQUIRE_NEURAL_TTS", "false").lower() == "true"
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -65,8 +66,10 @@ async def _generate_scene_audio(text: str, output_wav: Path) -> None:
         mp3.unlink(missing_ok=True)
         logger.info("Neural TTS generated with %s", TTS_VOICE)
     except Exception as exc:
-        logger.warning("Neural TTS failed (%s); using local fallback", exc)
         mp3.unlink(missing_ok=True)
+        if REQUIRE_NEURAL_TTS:
+            raise RuntimeError(f"Neural TTS failed and REQUIRE_NEURAL_TTS is enabled: {exc}") from exc
+        logger.warning("Neural TTS failed (%s); using local fallback", exc)
         _espeak_fallback(text, output_wav)
 
 
