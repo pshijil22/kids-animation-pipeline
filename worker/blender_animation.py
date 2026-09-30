@@ -134,7 +134,7 @@ def _kind(text):
     return "bear"
 
 
-def _create_scene_image(scene, character_kind=None):
+def _create_scene_image(scene, character_kind=None, include_character=True):
     description = (scene.get("visual_description") or "").strip()
     action = (scene.get("action") or "").strip()
     seed = _seed(scene)
@@ -183,7 +183,7 @@ def _create_scene_image(scene, character_kind=None):
     direction = -1 if seed % 2 else 1
     cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
     ground = int(VIDEO_HEIGHT * 0.73)
-    _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
+    if include_character:\n        _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
 
     for i in range(16):
         x = (seed * (i + 3) * 17) % VIDEO_WIDTH
@@ -191,6 +191,19 @@ def _create_scene_image(scene, character_kind=None):
         draw.ellipse((x, y, x + 18, y + 8), fill="#5BAE63")
 
     return image.filter(ImageFilter.SMOOTH)
+
+
+def _create_character_layer(scene, character_kind=None):
+    """Create a transparent character layer for independent animation."""
+    description = (scene.get("visual_description") or "").strip()
+    action = (scene.get("action") or "").strip()
+    seed = _seed(scene)
+    layer = Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
+    ground = int(VIDEO_HEIGHT * 0.73)
+    _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
+    return layer.filter(ImageFilter.SMOOTH)
 
 
 async def generate_scenes(story: dict, job_id: str) -> dict:
@@ -201,12 +214,20 @@ async def generate_scenes(story: dict, job_id: str) -> dict:
     for i, scene in enumerate(story.get("scenes", []), 1):
         number = int(scene.get("number", i))
         path = SCENES_DIR / f"{job_id}_scene_{number:03d}.png"
+        character_path = SCENES_DIR / f"{job_id}_scene_{number:03d}_character.png"
         try:
-            _create_scene_image(scene, primary_kind).save(path, "PNG", optimize=True)
+            _create_scene_image(scene, primary_kind, include_character=False).save(path, "PNG", optimize=True)
+            _create_character_layer(scene, primary_kind).save(character_path, "PNG", optimize=True)
         except Exception:
             logger.exception("Scene %s failed; creating fallback", number)
             Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), "#9DDCFF").save(path, "PNG")
-        scene_images.append({"number": number, "path": str(path), "description": scene.get("visual_description", "")})
+            Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0)).save(character_path, "PNG")
+        scene_images.append({
+            "number": number,
+            "path": str(path),
+            "character_path": str(character_path),
+            "description": scene.get("visual_description", ""),
+        })
     return {"scene_images": scene_images}
 
 
@@ -250,8 +271,11 @@ async def create_animated_video(story, audio_data, scene_data, job_id):
 
     for i, (scene, duration) in enumerate(zip(images, durations)):
         path = Path(scene["path"])
+        character_path = Path(scene.get("character_path", ""))
         if not path.exists():
             raise FileNotFoundError(path)
+        if not character_path.exists():
+            raise FileNotFoundError(character_path)
         frames = max(1, round(duration * VIDEO_FPS))
         if i % 4 == 0:
             z, x = "min(zoom+0.00055,1.10)", "iw/2-(iw/zoom/2)"
@@ -262,15 +286,32 @@ async def create_animated_video(story, audio_data, scene_data, job_id):
         else:
             z, x = "min(zoom+0.00045,1.08)", f"(iw-iw/zoom)*(1-on/{frames})"
 
+        bg_index = i * 2
+        character_index = bg_index + 1
         inputs += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(path)]
+        inputs += ["-loop", "1", "-t", f"{duration:.3f}", "-i", str(character_path)]
         filters.append(
-            f"[{i}:v]scale={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2}:force_original_aspect_ratio=increase,"
+            f"[{bg_index}:v]scale={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2}:force_original_aspect_ratio=increase,"
             f"crop={VIDEO_WIDTH * 2}:{VIDEO_HEIGHT * 2},"
             f"zoompan=z='{z}':x='{x}':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1[v{i}]"
+            f"d={frames}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1[bg{i}]"
+        )
+        filters.append(
+            f"[{character_index}:v]format=rgba,setpts=PTS-STARTPTS,"
+            f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:flags=lanczos[char{i}]"
+        )
+        filters.append(
+            f"[bg{i}][char{i}]overlay="
+            f"x='55*sin(2*PI*t/{3.8 + (i % 3) * 0.7:.2f})':"
+            f"y='18*sin(2*PI*t/{2.2 + (i % 4) * 0.4:.2f})':eval=frame[v{i}]"
         )
 
-    filters.append("".join(f"[v{i}]" for i in range(len(images))) + f"concat=n={len(images)}:v=1:a=0[v]")
+    filters.append("".join(f"[v{i}]" for i in range(len(images))) + f"concat=n={len(images)}:v=1:a=0[vraw]")
+    filters.append(
+        "[vraw]eq=contrast=1.06:saturation=1.10:gamma=1.02,"
+        "unsharp=5:5:0.35:5:5:0.0,vignette=PI/5.2,noise=alls=3:allf=t+u,"
+        "format=yuv420p[v]"
+    )
     filters.append(f"[v]{_subtitle_filter(subtitles)}[vout]")
 
     cmd = [
