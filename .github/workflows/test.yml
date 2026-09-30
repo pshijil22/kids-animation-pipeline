@@ -60,7 +60,10 @@ jobs:
           VIDEO_WIDTH: 1920
           VIDEO_HEIGHT: 1080
           VIDEO_FPS: 30
-          VIDEO_CRF: 24\n          VIDEO_BITRATE: 1400k\n          VIDEO_MAXRATE: 1600k\n          VIDEO_BUFSIZE: 3200k
+          VIDEO_CRF: 24
+          VIDEO_BITRATE: 1400k
+          VIDEO_MAXRATE: 1600k
+          VIDEO_BUFSIZE: 3200k
           VIDEO_PRESET: slow
           BLENDER_RENDER_FPS: 6
           BLENDER_RENDER_WIDTH: 640
@@ -76,7 +79,8 @@ jobs:
 
       - name: Final quality check
         run: |
-          file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+          file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p
+' | sort -nr | head -1 | cut -d' ' -f2-)
           test -n "$file"
           duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
           width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
@@ -89,7 +93,10 @@ jobs:
           python -c "d=float('$duration'); assert 1470 <= d <= 1830, f'Invalid duration: {d}s'"
           test "$width" = "1920"
           test "$height" = "1080"
-          test "$audio" = "aac"\n          size=$(stat -c%s "$file")\n          echo "Size: ${size} bytes"\n          test "$size" -lt 480000000
+          test "$audio" = "aac"
+          size=$(stat -c%s "$file")
+          echo "Size: ${size} bytes"
+          test "$size" -lt 480000000
 
       - name: Upload episode artifact
         uses: actions/upload-artifact@v4
