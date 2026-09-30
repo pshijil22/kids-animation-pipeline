@@ -1,37 +1,52 @@
 # Kids Animation Pipeline
 
-Automated 25–30 minute generative animated-movie production.
+Automated 25–30 minute **free, registration-free animated-movie pipeline**.
 
 Pipeline:
-Push to main -> GitHub Actions -> Ollama story generation -> neural narration -> generative cinematic video shots -> continuity-aware shot generation -> FFmpeg movie assembly -> 1080p H.264/AAC -> duration/resolution/audio QC -> artifact.
+Push to main -> GitHub Actions -> local Ollama story generation -> offline eSpeak NG narration -> Blender Eevee 3D animation -> FFmpeg 1080p MP4 -> quality checks -> downloadable artifact.
+
+## Cost and registration
+
+The production path does **not** require Runway, OpenAI, ElevenLabs, YouTube OAuth, a paid API key, or any other paid AI/video registration.
+
+- GitHub Actions runs the workflow automatically on pushes to `main`. Public repositories can use standard GitHub-hosted runners without Actions minute charges. citeturn0search3turn0search9
+- Ollama runs the story model locally in the workflow; local models do not require a cloud API key. citeturn0search0turn0search5
+- Blender is open-source and renders the movie locally in background mode with Eevee. Blender documents command-line/background rendering for automated jobs. citeturn1search0turn1search2turn2search0
+- eSpeak NG is an open-source offline TTS engine. It can write WAV audio directly and does not require an account. citeturn3search0
+
+There is an important quality tradeoff: removing paid generative-video APIs means the visuals are **procedurally generated 3D animation**, not cloud text-to-video generation. The pipeline still produces a real 3D animated movie with story-driven characters, props, camera movement, lighting and continuity, but it cannot honestly promise the photoreal/feature-film generation quality of a paid foundation video model.
 
 ## Production renderer
 
-The production renderer uses a generative video model rather than procedural 2D drawings. Each scene is written as a film shot with location, time, character actions, props, emotion, camera direction and continuity. The generated movie keeps the same character/world bible in every prompt and feeds the previous shot's final frame into the next shot as a continuity anchor.
+The renderer uses Blender Eevee to build an original stylized 3D world directly from the story JSON. Scene fields such as location, action, character actions, props, emotion and camera direction affect the generated movie. Blender runs headlessly, so no desktop or manual step is needed. citeturn1search0turn2search0
 
-The current provider is Runway Dev's WAN 3.0 (wan3) at 720p, then the finished movie is delivered at 1920x1080. WAN 3.0 supports reference-driven video generation and 2–30 second shots.
+No Runway secret is needed. `RUNWAYML_API_SECRET` has been removed from the workflow.
 
-### Required GitHub secret
+## Current production files
 
-Add RUNWAYML_API_SECRET to the repository's GitHub Actions secrets. Do not put the API key in source code or .env files.
+- `.github/workflows/test.yml`
+- `prompts/story.txt`
+- `worker/pipeline.py`
+- `worker/story.py`
+- `worker/tts.py`
+- `worker/generative_video.py`
+- `worker/youtube.py`
+- `worker/requirements.txt`
+- `.env.example`
 
-Every push to main runs automatically. No manual workflow trigger.
+The obsolete cloud-video renderer is gone. Generated files under `data/` are ignored by Git.
 
-Current production files:
-- .github/workflows/test.yml
-- prompts/story.txt
-- worker/pipeline.py
-- worker/story.py
-- worker/tts.py
-- worker/generative_video.py
-- worker/youtube.py
-- worker/requirements.txt
-- .env.example
+## Output
 
-The old procedural worker/blender_animation.py renderer has been removed.
+- 100 story scenes
+- 25–30 minutes
+- 1920x1080 delivery
+- 30 FPS delivery
+- H.264/AAC MP4
+- offline narration
+- subtitles
+- story-driven 3D animation
+- automatic GitHub Actions artifact
+- YouTube upload remains OFF
 
-Generated files under data/ are ignored by Git.
-
-Episode target: 100 story scenes, 25–30 minutes, 1920x1080 delivery, 30 FPS, H.264/AAC, neural English narration, cinematic generated animation, scene continuity, expressive character motion, story-driven camera work and original child-safe stories.
-
-YouTube upload is disabled by default.
+Every push to `main` automatically runs the full production pipeline; there is no manual workflow trigger.
