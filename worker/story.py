@@ -114,12 +114,12 @@ For ACT 1, BATCH 1 return:
   "duration_seconds":1650,
   "characters":[{{"name":"...","species":"...","appearance":"...","personality":"..."}}],
   "acts":[{{"number":1,"title":"..."}},{{"number":2,"title":"..."}},{{"number":3,"title":"..."}},{{"number":4,"title":"..."}},{{"number":5,"title":"..."}}],
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
 }}
 
 For every other batch return:
 {{
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","action":"...","emotion":"...","camera":"...","motion":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
 }}
 """
             logger.info("Generating story act %s/5 batch %s/2...", act, batch + 1)
@@ -213,7 +213,7 @@ def repair_story_json(story):
         scene.setdefault("act", ((i - 1) // SCENES_PER_ACT) + 1)
         scene.setdefault("title", f"Scene {i}")
         scene.setdefault("narration", "The adventure continues as everyone works together.")
-        scene.setdefault("visual_description", "A colorful children's cartoon scene with the recurring characters.")
+        scene.setdefault("visual_description", "A cinematic 3D animated-feature scene with the recurring characters.")
         scene.setdefault("location", "the established story world")
         scene.setdefault("time_of_day", "day")
         scene.setdefault("action", "The characters move together and discover something new.")
