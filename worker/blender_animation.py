@@ -350,14 +350,24 @@ async def create_animated_video(story, audio_data, scene_data, job_id):
         if not character_path.exists():
             raise FileNotFoundError(character_path)
         frames = max(1, round(duration * VIDEO_FPS))
-        if i % 4 == 0:
-            z, x = "min(zoom+0.00055,1.10)", "iw/2-(iw/zoom/2)"
-        elif i % 4 == 1:
-            z, x = "max(1.0,zoom-0.00035)", "iw/2-(iw/zoom/2)-20"
-        elif i % 4 == 2:
-            z, x = "min(zoom+0.00045,1.08)", f"(iw-iw/zoom)*on/{frames}"
+        camera = str(scene.get("camera", "")).lower()
+        action_text = _scene_tokens(scene)
+        if "close" in camera or "close-up" in camera:
+            z, x = "min(zoom+0.00075,1.16)", "iw/2-(iw/zoom/2)"
+        elif "wide" in camera or "establish" in camera:
+            z, x = "max(1.0,zoom-0.00020)", "iw/2-(iw/zoom/2)"
+        elif "left" in camera:
+            z, x = "min(zoom+0.00045,1.09)", f"(iw-iw/zoom)*(on/{frames})"
+        elif "right" in camera:
+            z, x = "min(zoom+0.00045,1.09)", f"(iw-iw/zoom)*(1-on/{frames})"
+        elif "push" in camera or "dolly" in camera:
+            z, x = "min(zoom+0.00060,1.12)", "iw/2-(iw/zoom/2)"
+        elif "pull" in camera:
+            z, x = "max(1.0,zoom-0.00030)", "iw/2-(iw/zoom/2)"
+        elif any(word in action_text for word in ("run", "chase", "race", "follow")):
+            z, x = "min(zoom+0.00045,1.08)", f"(iw-iw/zoom)*(on/{frames})"
         else:
-            z, x = "min(zoom+0.00045,1.08)", f"(iw-iw/zoom)*(1-on/{frames})"
+            z, x = "min(zoom+0.00040,1.08)", "iw/2-(iw/zoom/2)"
 
         bg_index = i * 2
         character_index = bg_index + 1
