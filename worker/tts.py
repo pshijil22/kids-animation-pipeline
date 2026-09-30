@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(os.getenv('DATA_DIR', './data'))
 AUDIO_DIR = DATA_DIR / 'audio'
+TARGET_SCENE_SECONDS = 16.5
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,18 +69,57 @@ async def generate_narration_from_story(story: dict, job_id: str) -> dict:
             if audio_duration <= 0:
                 audio_duration = scene_duration
             
-            logger.info(f"Scene {i}: {audio_duration:.2f}s")
-            
+            logger.info(f"Scene {i}: spoken audio {audio_duration:.2f}s")
+            spoken_duration = audio_duration
+            target_duration = TARGET_SCENE_SECONDS
+
+            # Keep each scene at a predictable duration so short LLM narration
+            # cannot collapse the 100-scene episode into only a few minutes.
+            if abs(audio_duration - target_duration) > 0.05:
+                if audio_duration < target_duration:
+                    filter_expr = f"apad=pad_dur={target_duration - audio_duration:.3f},atrim=duration={target_duration:.3f}"
+                else:
+                    tempo = audio_duration / target_duration
+                    factors = []
+                    while tempo > 2.0:
+                        factors.append("2.0")
+                        tempo /= 2.0
+                    while tempo < 0.5:
+                        factors.append("0.5")
+                        tempo /= 0.5
+                    factors.append(f"{tempo:.6f}")
+                    filter_expr = ",".join(f"atempo={factor}" for factor in factors)
+                    filter_expr += f",atrim=duration={target_duration:.3f}"
+                normalized_file = AUDIO_DIR / f"{job_id}_scene_{i:02d}_normalized.wav"
+                normalize = subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-v", "error",
+                        "-i", str(scene_audio_file),
+                        "-af", filter_expr,
+                        "-ar", "22050", "-ac", "1",
+                        "-c:a", "pcm_s16le", str(normalized_file),
+                    ],
+                    capture_output=True,
+                    timeout=30,
+                    text=True,
+                )
+                if normalize.returncode != 0:
+                    raise RuntimeError(f"Audio normalization failed: {normalize.stderr[-1000:]}")
+                normalized_file.replace(scene_audio_file)
+                audio_duration = target_duration
+
+            logger.info(f"Scene {i}: timeline duration {audio_duration:.2f}s")
+
             scene_files.append({
                 'path': str(scene_audio_file),
                 'duration': audio_duration,
                 'scene_num': i,
                 'text': narration_text
             })
-            
-            # Subtitle entry
+
+            # Subtitles cover spoken narration, not the padded pause.
             start_time = _format_srt_time(current_time)
-            end_time = _format_srt_time(current_time + audio_duration)
+            end_time = _format_srt_time(current_time + min(spoken_duration, audio_duration))
             
             subtitle_entries.append({
                 'index': i,
