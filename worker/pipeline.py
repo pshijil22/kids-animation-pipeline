@@ -1,7 +1,7 @@
 """
 Single orchestration entry point for the automated kids animation pipeline.
 
-Flow: story acts -> narration -> 2D scenes -> animated MP4 -> optional YouTube upload.
+Flow: story acts -> narration -> generative movie shots -> cinematic MP4 -> optional YouTube upload.
 """
 import asyncio
 import json
@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from story import generate_story_with_llm, validate_story_json
-from blender_animation import generate_scenes, create_animated_video
+from generative_video import generate_scenes, create_animated_video
 from tts import generate_narration_from_story
 from youtube import upload_to_youtube
 
