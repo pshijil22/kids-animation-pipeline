@@ -59,7 +59,7 @@ def _concat_audio_video(video, narration, subtitles, output):
         f"unsharp=5:5:0.2:5:5:0.0,{subtitle_filter}[v]",
         "-map", "[v]", "-map", "1:a:0", "-c:v", "libx264",
         "-preset", os.getenv("VIDEO_PRESET", "slow"),
-        "-crf", os.getenv("VIDEO_CRF", "18"), "-c:a", "aac", "-b:a", "160k",
+        "-b:v", os.getenv("VIDEO_BITRATE", "1400k"), "-maxrate", os.getenv("VIDEO_MAXRATE", "1600k"), "-bufsize", os.getenv("VIDEO_BUFSIZE", "3200k"), "-c:a", "aac", "-b:a", "96k",
         "-ar", "48000", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-shortest", str(output),
     ]
