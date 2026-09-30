@@ -143,6 +143,10 @@ async def generate_narration_from_story(story: dict, job_id: str) -> dict:
             logger.info("Scene %s: %.2fs spoken, %.2fs timeline", i, spoken_duration, target_duration)
         except Exception as exc:
             logger.error("Scene %s TTS failed: %s", i, exc)
+            if REQUIRE_NEURAL_TTS:
+                raise RuntimeError(
+                    f"Production neural TTS failed for scene {i}: {exc}"
+                ) from exc
             _create_silent_audio(str(scene_audio_file), target_duration)
             scene_files.append({
                 "path": str(scene_audio_file),
