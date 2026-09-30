@@ -1,4 +1,4 @@
-"""Neural text-to-speech narration with a reliable local fallback."""
+"""Neural text-to-speech narration for production episodes."""
 import asyncio
 import logging
 import os
