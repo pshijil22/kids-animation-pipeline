@@ -1,85 +1,103 @@
-"""
-Text-to-Speech Generation using eSpeak-ng
-Production-ready with error handling and fallbacks
-"""
-import os
-import subprocess
-import logging
+"""Neural text-to-speech narration with a reliable local fallback."""
 import asyncio
+import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.getenv('DATA_DIR', './data'))
-AUDIO_DIR = DATA_DIR / 'audio'
+DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
+AUDIO_DIR = DATA_DIR / "audio"
 TARGET_SCENE_SECONDS = 16.5
+TTS_VOICE = os.getenv("TTS_VOICE", "en-US-JennyNeural")
+TTS_RATE = os.getenv("TTS_RATE", "-5%")
+TTS_PITCH = os.getenv("TTS_PITCH", "+0Hz")
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 
-async def generate_narration_from_story(story: dict, job_id: str) -> dict:
-    """
-    Generate narration audio from story scenes with comprehensive error handling.
-    """
-    
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Generating narration for job {job_id}")
-    
-    scene_files = []
-    total_duration = 0
-    subtitle_entries = []
-    current_time = 0
-    
-    # Generate audio for each scene
-    for i, scene in enumerate(story.get('scenes', []), 1):
-        narration_text = scene.get('narration', '')
-        scene_duration = scene.get('duration_seconds', 10)
-        
-        if not narration_text or not narration_text.strip():
-            logger.warning(f"Scene {i} has no narration, using placeholder")
-            narration_text = "..."
-        
-        logger.info(f"Scene {i}: {narration_text[:50]}...")
-        
-        scene_audio_file = AUDIO_DIR / f"{job_id}_scene_{i:02d}.wav"
-        
-        try:
-            # Use espeak-ng with safe defaults
-            result = subprocess.run(
-                [
-                    "espeak-ng",
-                    "-w", str(scene_audio_file),
-                    "-s", "140",
-                    "-p", "50",
-                    "--",
-                    narration_text[:500]  # Limit text length
-                ],
-                capture_output=True,
-                timeout=30,
-                text=True
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"eSpeak failed for scene {i}: {result.stderr}")
-                # Create silent audio fallback
-                _create_silent_audio(str(scene_audio_file), scene_duration)
-            
-            # Get audio duration
-            audio_duration = _get_audio_duration(str(scene_audio_file))
-            if audio_duration <= 0:
-                audio_duration = scene_duration
-            
-            logger.info(f"Scene {i}: spoken audio {audio_duration:.2f}s")
-            spoken_duration = audio_duration
-            target_duration = TARGET_SCENE_SECONDS
+async def _neural_tts(text: str, output_mp3: Path) -> None:
+    """Generate natural neural speech using Microsoft Edge's neural TTS service."""
+    import edge_tts
 
-            # Keep each scene at a predictable duration so short LLM narration
-            # cannot collapse the 100-scene episode into only a few minutes.
-            if abs(audio_duration - target_duration) > 0.05:
-                if audio_duration < target_duration:
-                    filter_expr = f"apad=pad_dur={target_duration - audio_duration:.3f},atrim=duration={target_duration:.3f}"
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=TTS_VOICE,
+        rate=TTS_RATE,
+        pitch=TTS_PITCH,
+    )
+    await communicate.save(str(output_mp3))
+
+
+def _espeak_fallback(text: str, output_wav: Path) -> None:
+    """Local fallback if neural TTS is temporarily unavailable."""
+    result = subprocess.run(
+        ["espeak-ng", "-w", str(output_wav), "-s", "145", "-p", "52", "--", text[:700]],
+        capture_output=True,
+        timeout=45,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-1000:] or "eSpeak failed")
+
+
+def _convert_to_wav(source: Path, target: Path) -> None:
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error", "-i", str(source),
+            "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", str(target),
+        ],
+        capture_output=True,
+        timeout=60,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-1500:] or "Audio conversion failed")
+
+
+async def _generate_scene_audio(text: str, output_wav: Path) -> None:
+    mp3 = output_wav.with_suffix(".mp3")
+    try:
+        await _neural_tts(text, mp3)
+        _convert_to_wav(mp3, output_wav)
+        mp3.unlink(missing_ok=True)
+        logger.info("Neural TTS generated with %s", TTS_VOICE)
+    except Exception as exc:
+        logger.warning("Neural TTS failed (%s); using local fallback", exc)
+        mp3.unlink(missing_ok=True)
+        _espeak_fallback(text, output_wav)
+
+
+async def generate_narration_from_story(story: dict, job_id: str) -> dict:
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("Generating human-style narration for job %s", job_id)
+
+    scene_files = []
+    total_duration = 0.0
+    subtitle_entries = []
+    current_time = 0.0
+
+    for i, scene in enumerate(story.get("scenes", []), 1):
+        narration_text = (scene.get("narration") or "").strip() or "Let's see what happens next."
+        scene_audio_file = AUDIO_DIR / f"{job_id}_scene_{i:03d}.wav"
+        target_duration = TARGET_SCENE_SECONDS
+
+        try:
+            await _generate_scene_audio(narration_text, scene_audio_file)
+            spoken_duration = _get_audio_duration(str(scene_audio_file))
+            if spoken_duration <= 0:
+                raise RuntimeError("Generated audio has no measurable duration")
+
+            if abs(spoken_duration - target_duration) > 0.05:
+                if spoken_duration < target_duration:
+                    filter_expr = (
+                        f"apad=pad_dur={target_duration - spoken_duration:.3f},"
+                        f"atrim=duration={target_duration:.3f}"
+                    )
                 else:
-                    tempo = audio_duration / target_duration
+                    tempo = spoken_duration / target_duration
                     factors = []
                     while tempo > 2.0:
                         factors.append("2.0")
@@ -90,181 +108,130 @@ async def generate_narration_from_story(story: dict, job_id: str) -> dict:
                     factors.append(f"{tempo:.6f}")
                     filter_expr = ",".join(f"atempo={factor}" for factor in factors)
                     filter_expr += f",atrim=duration={target_duration:.3f}"
-                normalized_file = AUDIO_DIR / f"{job_id}_scene_{i:02d}_normalized.wav"
-                normalize = subprocess.run(
+
+                normalized = AUDIO_DIR / f"{job_id}_scene_{i:03d}_normalized.wav"
+                result = subprocess.run(
                     [
-                        "ffmpeg", "-y", "-v", "error",
-                        "-i", str(scene_audio_file),
-                        "-af", filter_expr,
-                        "-ar", "22050", "-ac", "1",
-                        "-c:a", "pcm_s16le", str(normalized_file),
+                        "ffmpeg", "-y", "-v", "error", "-i", str(scene_audio_file),
+                        "-af", filter_expr, "-ar", "22050", "-ac", "1",
+                        "-c:a", "pcm_s16le", str(normalized),
                     ],
-                    capture_output=True,
-                    timeout=30,
-                    text=True,
+                    capture_output=True, timeout=60, text=True,
                 )
-                if normalize.returncode != 0:
-                    raise RuntimeError(f"Audio normalization failed: {normalize.stderr[-1000:]}")
-                normalized_file.replace(scene_audio_file)
-                audio_duration = target_duration
-
-            logger.info(f"Scene {i}: timeline duration {audio_duration:.2f}s")
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr[-1200:] or "Normalization failed")
+                normalized.replace(scene_audio_file)
 
             scene_files.append({
-                'path': str(scene_audio_file),
-                'duration': audio_duration,
-                'scene_num': i,
-                'text': narration_text
+                "path": str(scene_audio_file),
+                "duration": target_duration,
+                "scene_num": i,
+                "text": narration_text,
             })
-
-            # Subtitles cover spoken narration, not the padded pause.
-            start_time = _format_srt_time(current_time)
-            end_time = _format_srt_time(current_time + min(spoken_duration, audio_duration))
-            
             subtitle_entries.append({
-                'index': i,
-                'start': start_time,
-                'end': end_time,
-                'text': narration_text[:200],
-                'scene_title': scene.get('title', f'Scene {i}')
+                "index": i,
+                "start": _format_srt_time(current_time),
+                "end": _format_srt_time(current_time + min(spoken_duration, target_duration)),
+                "text": narration_text[:220],
+                "scene_title": scene.get("title", f"Scene {i}"),
             })
-            
-            current_time += audio_duration
-            total_duration += audio_duration
-            
-        except Exception as e:
-            logger.error(f"Scene {i} failed: {e}")
-            # Create minimal audio
-            _create_silent_audio(str(scene_audio_file), scene_duration)
+            current_time += target_duration
+            total_duration += target_duration
+            logger.info("Scene %s: %.2fs spoken, %.2fs timeline", i, spoken_duration, target_duration)
+        except Exception as exc:
+            logger.error("Scene %s TTS failed: %s", i, exc)
+            _create_silent_audio(str(scene_audio_file), target_duration)
             scene_files.append({
-                'path': str(scene_audio_file),
-                'duration': scene_duration,
-                'scene_num': i,
-                'text': narration_text
+                "path": str(scene_audio_file),
+                "duration": target_duration,
+                "scene_num": i,
+                "text": narration_text,
             })
-            total_duration += scene_duration
-    
-    # Combine audio files
+            subtitle_entries.append({
+                "index": i,
+                "start": _format_srt_time(current_time),
+                "end": _format_srt_time(current_time + target_duration),
+                "text": narration_text[:220],
+                "scene_title": scene.get("title", f"Scene {i}"),
+            })
+            current_time += target_duration
+            total_duration += target_duration
+
     narration_file = AUDIO_DIR / f"{job_id}_narration.wav"
     _combine_audio_files(scene_files, str(narration_file))
-    
-    # Generate subtitles
     subtitles_file = _generate_subtitles(job_id, subtitle_entries)
-    
-    logger.info(f"Narration complete: {total_duration:.2f}s")
-    
+
+    logger.info("Narration complete: %.2fs using %s", total_duration, TTS_VOICE)
     return {
-        'narration_file': str(narration_file),
-        'scene_narrations': scene_files,
-        'subtitles_file': str(subtitles_file),
-        'total_duration': total_duration
+        "narration_file": str(narration_file),
+        "scene_narrations": scene_files,
+        "subtitles_file": str(subtitles_file),
+        "total_duration": total_duration,
     }
 
 
 def _create_silent_audio(output_file: str, duration: float) -> None:
-    """Create silent audio file as fallback."""
-    import struct
-    sample_rate = 22050
-    num_samples = int(sample_rate * duration)
-    
-    try:
-        with open(output_file, 'wb') as f:
-            # WAV header
-            f.write(b'RIFF')
-            f.write(struct.pack('<I', 36 + num_samples * 2))
-            f.write(b'WAVE')
-            f.write(b'fmt ')
-            f.write(struct.pack('<I', 16))
-            f.write(struct.pack('<HHIIHH', 1, 1, sample_rate, sample_rate * 2, 2, 16))
-            f.write(b'data')
-            f.write(struct.pack('<I', num_samples * 2))
-            # Silent audio (zeros)
-            f.write(b'\x00' * (num_samples * 2))
-        logger.info(f"Created silent audio: {output_file}")
-    except Exception as e:
-        logger.error(f"Failed to create silent audio: {e}")
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+            "-i", "anullsrc=r=22050:cl=mono", "-t", str(duration),
+            "-c:a", "pcm_s16le", output_file,
+        ],
+        capture_output=True, timeout=30, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-1000:] or "Could not create silence")
 
 
 def _get_audio_duration(audio_file: str) -> float:
-    """Get audio duration, with error handling."""
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                audio_file
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", audio_file,
             ],
-            capture_output=True,
-            timeout=10,
-            text=True
+            capture_output=True, timeout=10, text=True,
         )
-        
         if result.returncode == 0 and result.stdout.strip():
             return float(result.stdout.strip())
-    except Exception as e:
-        logger.warning(f"Could not get duration: {e}")
-    
+    except Exception as exc:
+        logger.warning("Could not get duration: %s", exc)
     return 0.0
 
 
 def _combine_audio_files(scene_files: list, output_file: str) -> None:
-    """Combine audio files with error handling."""
     if not scene_files:
-        logger.warning("No audio files to combine")
-        return
-    
+        raise ValueError("No audio files to combine")
     concat_file = Path(output_file).parent / f"{Path(output_file).stem}_concat.txt"
-    
     try:
-        with open(concat_file, 'w') as f:
+        with open(concat_file, "w", encoding="utf-8") as f:
             for scene in scene_files:
-                abs_path = Path(scene['path']).resolve()
-                f.write(f"file '{abs_path}'\n")
-        
+                f.write(f"file '{Path(scene['path']).resolve()}'\n")
         result = subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file), 
-             "-c", "copy", output_file],
-            capture_output=True,
-            timeout=60,
-            text=True
+            [
+                "ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
+                "-i", str(concat_file), "-c", "copy", output_file,
+            ],
+            capture_output=True, timeout=120, text=True,
         )
-        
         if result.returncode != 0:
-            logger.warning(f"Audio combine failed, using first file: {result.stderr}")
-            import shutil
-            shutil.copy(scene_files[0]['path'], output_file)
-        
-        logger.info(f"Audio combined: {output_file}")
+            raise RuntimeError(result.stderr[-1500:] or "Audio combine failed")
+    finally:
         concat_file.unlink(missing_ok=True)
-        
-    except Exception as e:
-        logger.error(f"Audio combine error: {e}")
-        import shutil
-        if scene_files:
-            shutil.copy(scene_files[0]['path'], output_file)
 
 
 def _generate_subtitles(job_id: str, subtitle_entries: list) -> str:
-    """Generate SRT subtitles."""
     srt_file = AUDIO_DIR / f"{job_id}_subtitles.srt"
-    
-    try:
-        with open(srt_file, 'w', encoding='utf-8') as f:
-            for entry in subtitle_entries:
-                f.write(f"{entry['index']}\n")
-                f.write(f"{entry['start']} --> {entry['end']}\n")
-                f.write(f"{entry['scene_title']}\n")
-                f.write(f"{entry['text']}\n\n")
-        logger.info(f"Subtitles generated: {srt_file}")
-    except Exception as e:
-        logger.error(f"Subtitle generation failed: {e}")
-    
+    with open(srt_file, "w", encoding="utf-8") as f:
+        for entry in subtitle_entries:
+            f.write(f"{entry['index']}\n")
+            f.write(f"{entry['start']} --> {entry['end']}\n")
+            f.write(f"{entry['scene_title']}\n")
+            f.write(f"{entry['text']}\n\n")
     return str(srt_file)
 
 
 def _format_srt_time(seconds: float) -> str:
-    """Format time for SRT."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
