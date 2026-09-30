@@ -123,12 +123,43 @@ For every other batch return:
 }}
 """
             logger.info("Generating story act %s/5 batch %s/2...", act, batch + 1)
-            result = await _ask_ollama(prompt)
-            act_scenes = result.get("scenes", [])
+
+            # LLMs can occasionally return valid JSON with an empty/short scenes
+            # array. Retry the same batch with a progressively stricter instruction
+            # instead of throwing away the entire 25-30 minute production.
+            result = None
+            act_scenes = []
+            for attempt in range(1, 4):
+                retry_prompt = prompt
+                if attempt > 1:
+                    retry_prompt += f"""
+IMPORTANT RETRY {attempt}/3:
+Your previous response did not contain {SCENES_PER_BATCH} usable scenes.
+Return ONLY a JSON object with a "scenes" array containing EXACTLY
+{SCENES_PER_BATCH} complete scene objects for this batch. Do not return an
+empty array. Do not summarize. Do not omit any scene.
+"""
+                try:
+                    result = await _ask_ollama(retry_prompt)
+                    act_scenes = result.get("scenes", []) if isinstance(result, dict) else []
+                    if len(act_scenes) >= SCENES_PER_BATCH:
+                        break
+                    logger.warning(
+                        "Act %s batch %s attempt %s returned %s scenes; retrying",
+                        act, batch + 1, attempt, len(act_scenes)
+                    )
+                except (ValueError, requests.RequestException) as exc:
+                    logger.warning(
+                        "Act %s batch %s attempt %s failed: %s; retrying",
+                        act, batch + 1, attempt, exc
+                    )
+                    if attempt == 3:
+                        raise
+
             if len(act_scenes) < SCENES_PER_BATCH:
                 raise ValueError(
                     f"Act {act} batch {batch + 1} must contain at least "
-                    f"{SCENES_PER_BATCH} scenes; received {len(act_scenes)}"
+                    f"{SCENES_PER_BATCH} scenes after 3 attempts; received {len(act_scenes)}"
                 )
             act_scenes = act_scenes[:SCENES_PER_BATCH]
             for offset, scene in enumerate(act_scenes):
