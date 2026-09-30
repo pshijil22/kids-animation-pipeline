@@ -1,93 +1,95 @@
-name: Build and Test Pipeline
+name: Build Kids Animation Episode
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - '**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 240
     services:
       ollama:
         image: ollama/ollama:latest
         ports:
           - 11434:11434
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y espeak-ng ffmpeg curl
-    
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r worker/requirements.txt
-    
-    - name: Wait for Ollama to be ready
-      run: |
-        echo "Waiting for Ollama service to be fully ready..."
-        for i in {1..180}; do
-          if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-            echo "✅ Ollama is ready"
-            break
-          fi
-          echo "Attempt $i/180: Waiting for Ollama..."
-          sleep 1
-        done
-    
-    - name: Pull Ollama model
-      run: |
-        echo "Pulling llama3.2:3b model..."
-        curl -X POST http://localhost:11434/api/pull -d '{"name":"llama3.2:3b"}' || true
-        sleep 10
-      continue-on-error: true
-    
-    - name: Lint Python code
-      run: |
-        pip install flake8
-        flake8 worker/*.py --count --select=E9,F63,F7,F82 --show-source --statistics
-      continue-on-error: true
-    
-    - name: Test imports
-      run: |
-        cd worker
-        python -c "from pipeline import generate_story; print('✅ Pipeline imports OK')"
-        python -c "from story import generate_story_with_llm; print('✅ Story module OK')"
-        python -c "from tts import generate_narration_from_story; print('✅ TTS module OK')"
-        python -c "from scenes import generate_scenes; print('✅ Scenes module OK')"
-        python -c "from video import create_video; print('✅ Video module OK')"
-        python -c "from youtube import upload_to_youtube; print('✅ YouTube module OK')"
-    
-    - name: Verify Docker files
-      run: |
-        ls -la worker/Dockerfile
-        ls -la docker-compose.yml
-        ls -la .env.example
-    
-    - name: Check documentation
-      run: |
-        test -f README.md && echo "✅ README.md exists"
-        test -f QUICK_START.md && echo "✅ QUICK_START.md exists"
-        test -f FINAL_README.md && echo "✅ FINAL_README.md exists"
-    
-    - name: Upload test results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: |
-          worker/
-          *.md
-        retention-days: 30
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng ffmpeg curl
+          python -m pip install --upgrade pip
+          pip install -r worker/requirements.txt
+          pip install flake8
+
+      - name: Start Ollama model
+        run: |
+          for i in {1..180}; do
+            curl -sf http://localhost:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+          curl --fail --retry 5 --retry-delay 5 -X POST http://localhost:11434/api/pull \
+            -H 'Content-Type: application/json' -d '{"name":"llama3.2:3b"}'
+
+      - name: Validate pipeline
+        run: |
+          flake8 worker/*.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          cd worker
+          python -m compileall -q .
+          python -c "from pipeline import generate_story; print('Pipeline OK')"
+
+      - name: Generate, render and optionally publish
+        env:
+          OLLAMA_URL: http://localhost:11434
+          OLLAMA_MODEL: llama3.2:3b
+          DATA_DIR: ./data
+          VIDEO_WIDTH: 1920
+          VIDEO_HEIGHT: 1080
+          VIDEO_FPS: 30
+          VIDEO_CRF: 18
+          VIDEO_PRESET: slow
+          YOUTUBE_UPLOAD: ${{ secrets.YOUTUBE_UPLOAD }}
+          YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+        run: |
+          cd worker
+          python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
+
+      - name: Final quality check
+        run: |
+          file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+          test -n "$file"
+          duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
+          width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
+          height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
+          audio=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$file")
+          echo "Episode: $file"
+          echo "Duration: ${duration}s"
+          echo "Resolution: ${width}x${height}"
+          echo "Audio: ${audio}"
+          python -c "d=float('$duration'); assert 1470 <= d <= 1830, f'Invalid duration: {d}s'"
+          test "$width" = "1920"
+          test "$height" = "1080"
+          test "$audio" = "aac"
+
+      - name: Upload episode artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-ready-episode
+          path: worker/data/videos/*.mp4
+          if-no-files-found: error
+          retention-days: 30
