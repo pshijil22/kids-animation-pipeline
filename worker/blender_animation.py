@@ -180,10 +180,10 @@ def _create_scene_image(scene, character_kind=None, include_character=True):
         )
 
     # Semantic action changes position/pose slightly so consecutive scenes are not identical.
-    direction = -1 if seed % 2 else 1
     cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
     ground = int(VIDEO_HEIGHT * 0.73)
-    if include_character:\n        _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
+    if include_character:
+        _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
 
     for i in range(16):
         x = (seed * (i + 3) * 17) % VIDEO_WIDTH
