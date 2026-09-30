@@ -13,6 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+
     services:
       ollama:
         image: ollama/ollama:latest
@@ -28,10 +29,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install free local tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg curl
+          sudo apt-get install -y ffmpeg curl blender espeak-ng
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
           pip install flake8
@@ -42,8 +43,7 @@ jobs:
             curl -sf http://localhost:11434/api/tags >/dev/null && break
             sleep 1
           done
-          curl --fail --retry 5 --retry-delay 5 -X POST http://localhost:11434/api/pull \
-            -H 'Content-Type: application/json' -d '{"name":"llama3.2:3b"}'
+          curl --fail --retry 5 --retry-delay 5 -X POST http://localhost:11434/api/pull             -H 'Content-Type: application/json' -d '{"name":"llama3.2:3b"}'
 
       - name: Validate pipeline
         run: |
@@ -62,19 +62,14 @@ jobs:
           VIDEO_FPS: 30
           VIDEO_CRF: 18
           VIDEO_PRESET: slow
-          REQUIRE_NEURAL_TTS: true
-          TTS_VOICE: en-US-JennyNeural
-          TTS_RATE: -5%
-          TTS_PITCH: +0Hz
-          RUNWAYML_API_SECRET: ${{ secrets.RUNWAYML_API_SECRET }}
-          RUNWAY_VIDEO_MODEL: wan3
-          RUNWAY_VIDEO_RESOLUTION: 720p
-          RUNWAY_VIDEO_RATIO: 1280:720
-          RUNWAY_VIDEO_DURATION: 17
-          RUNWAY_TASK_TIMEOUT: 1800
-          YOUTUBE_UPLOAD: ${{ secrets.YOUTUBE_UPLOAD }}
-          YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
-          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          BLENDER_RENDER_FPS: 6
+          BLENDER_RENDER_WIDTH: 640
+          BLENDER_RENDER_HEIGHT: 360
+          TTS_ENGINE: espeak-ng
+          TTS_VOICE: en-us
+          TTS_RATE: 155
+          TTS_PITCH: 50
+          YOUTUBE_UPLOAD: false
         run: |
           cd worker
           python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
