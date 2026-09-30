@@ -2,7 +2,6 @@
 import asyncio
 import logging
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -32,18 +31,6 @@ async def _neural_tts(text: str, output_mp3: Path) -> None:
     await communicate.save(str(output_mp3))
 
 
-def _espeak_fallback(text: str, output_wav: Path) -> None:
-    """Local fallback if neural TTS is temporarily unavailable."""
-    result = subprocess.run(
-        ["espeak-ng", "-w", str(output_wav), "-s", "145", "-p", "52", "--", text[:700]],
-        capture_output=True,
-        timeout=45,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr[-1000:] or "eSpeak failed")
-
-
 def _convert_to_wav(source: Path, target: Path) -> None:
     result = subprocess.run(
         [
@@ -60,17 +47,21 @@ def _convert_to_wav(source: Path, target: Path) -> None:
 
 async def _generate_scene_audio(text: str, output_wav: Path) -> None:
     mp3 = output_wav.with_suffix(".mp3")
-    try:
-        await _neural_tts(text, mp3)
-        _convert_to_wav(mp3, output_wav)
-        mp3.unlink(missing_ok=True)
-        logger.info("Neural TTS generated with %s", TTS_VOICE)
-    except Exception as exc:
-        mp3.unlink(missing_ok=True)
-        if REQUIRE_NEURAL_TTS:
-            raise RuntimeError(f"Neural TTS failed and REQUIRE_NEURAL_TTS is enabled: {exc}") from exc
-        logger.warning("Neural TTS failed (%s); using local fallback", exc)
-        _espeak_fallback(text, output_wav)
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            await _neural_tts(text, mp3)
+            _convert_to_wav(mp3, output_wav)
+            mp3.unlink(missing_ok=True)
+            logger.info("Neural TTS generated with %s (attempt %s)", TTS_VOICE, attempt)
+            return
+        except Exception as exc:
+            last_error = exc
+            mp3.unlink(missing_ok=True)
+            if attempt < 3:
+                logger.warning("Neural TTS attempt %s/3 failed: %s; retrying", attempt, exc)
+                await asyncio.sleep(2 * attempt)
+    raise RuntimeError(f"Neural TTS failed after 3 attempts: {last_error}") from last_error
 
 
 async def generate_narration_from_story(story: dict, job_id: str) -> dict:
