@@ -317,7 +317,7 @@ async def create_animated_video(story, audio_data, scene_data, job_id):
     cmd = [
         "ffmpeg", "-y", "-loglevel", "warning", *inputs, "-i", str(narration),
         "-filter_complex", ";".join(filters),
-        "-map", "[vout]", "-map", f"{len(images)}:a:0",
+        "-map", "[vout]", "-map", f"{len(images) * 2}:a:0",
         "-c:v", "libx264", "-preset", VIDEO_PRESET, "-crf", VIDEO_CRF,
         "-tune", "animation", "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", str(output),
