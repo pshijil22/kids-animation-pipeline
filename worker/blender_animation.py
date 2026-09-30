@@ -134,11 +134,82 @@ def _kind(text):
     return "bear"
 
 
+def _scene_tokens(scene):
+    text = " ".join(str(scene.get(k, "")) for k in (
+        "visual_description", "location", "action", "character_actions", "props",
+        "emotion", "continuity"
+    )).lower()
+    return text
+
+def _scene_stage(scene):
+    text = _scene_tokens(scene)
+    time = str(scene.get("time_of_day", "")).lower()
+    if any(x in text for x in ("night", "moon", "midnight", "stars")) or "night" in time:
+        sky, ground = "#18244A", "#31506A"
+    elif any(x in text for x in ("sunset", "dusk", "evening")) or "sunset" in time or "evening" in time:
+        sky, ground = "#F4A261", "#7FB069"
+    elif any(x in text for x in ("cave", "underground")):
+        sky, ground = "#4B5563", "#374151"
+    elif any(x in text for x in ("snow", "winter", "ice")):
+        sky, ground = "#BFE7F5", "#DDEAF0"
+    elif any(x in text for x in ("beach", "ocean", "sea", "lake", "river", "water")):
+        sky, ground = "#82D7F7", "#9AD7A0"
+    else:
+        sky, ground = None, None
+    return text, sky, ground
+
+def _draw_story_props(draw, text, horizon):
+    if any(x in text for x in ("river", "lake", "ocean", "sea", "water", "stream")):
+        draw.polygon([(0, horizon + 10), (VIDEO_WIDTH, horizon + 10), (VIDEO_WIDTH, horizon + 150), (0, horizon + 95)], fill="#62B6CB")
+        for y in (horizon + 45, horizon + 85):
+            for x in range(80, VIDEO_WIDTH, 220):
+                draw.line((x, y, x + 90, y), fill="#D8F3FF", width=5)
+    if any(x in text for x in ("bridge", "wooden bridge")):
+        y = horizon - 5
+        draw.rectangle((VIDEO_WIDTH//2 - 300, y, VIDEO_WIDTH//2 + 300, y + 45), fill="#9A6A3A", outline="#5B3A29", width=5)
+        for x in range(VIDEO_WIDTH//2 - 270, VIDEO_WIDTH//2 + 300, 70):
+            draw.rectangle((x, y - 35, x + 20, y + 5), fill="#7A5030")
+    if any(x in text for x in ("house", "home", "cottage")):
+        x = VIDEO_WIDTH//2 + 300
+        y = horizon - 190
+        draw.rectangle((x - 110, y, x + 110, horizon + 10), fill="#F2D6A2", outline="#6B4F3A", width=5)
+        draw.polygon([(x - 140, y), (x, y - 120), (x + 140, y)], fill="#C96B5B", outline="#6B4F3A")
+        draw.rectangle((x - 28, horizon - 80, x + 28, horizon + 10), fill="#8B5A3C")
+    if any(x in text for x in ("mountain", "hill")):
+        draw.polygon([(0, horizon), (260, horizon-330), (520, horizon), (760, horizon-250), (1020, horizon), (1280, horizon-360), (1600, horizon)], fill="#83A6B8")
+    if any(x in text for x in ("treasure", "chest", "box")):
+        x, y = VIDEO_WIDTH//2 + 170, horizon - 35
+        draw.rectangle((x-55, y-35, x+55, y+35), fill="#B7791F", outline="#5B3A29", width=5)
+        draw.arc((x-55, y-55, x+55, y+35), 180, 360, fill="#F6D365", width=7)
+    if any(x in text for x in ("key", "map", "letter", "note")):
+        x, y = VIDEO_WIDTH//2 - 210, horizon + 10
+        draw.rectangle((x-45, y-30, x+45, y+30), fill="#F8E7B0", outline="#8B6B3E", width=4)
+
+def _story_character_position(scene, index=0):
+    text = _scene_tokens(scene)
+    emotion = str(scene.get("emotion", "")).lower()
+    if any(x in text for x in ("run", "running", "chase", "hurry", "race")):
+        return (VIDEO_WIDTH * (0.30 + 0.18 * index), 0.72, 1.18)
+    if any(x in text for x in ("jump", "leap", "hop")):
+        return (VIDEO_WIDTH * (0.38 + 0.24 * index), 0.62, 1.18)
+    if any(x in text for x in ("hide", "behind", "quiet", "listen", "sneak")):
+        return (VIDEO_WIDTH * (0.44 + 0.18 * index), 0.75, 0.98)
+    if any(x in text for x in ("celebrate", "cheer", "dance", "happy")) or "excited" in emotion:
+        return (VIDEO_WIDTH * (0.38 + 0.24 * index), 0.70, 1.22)
+    if any(x in text for x in ("discover", "find", "look", "search", "point")):
+        return (VIDEO_WIDTH * (0.42 + 0.20 * index), 0.73, 1.15)
+    return (VIDEO_WIDTH * (0.36 + 0.26 * index), 0.73, 1.08)
+
 def _create_scene_image(scene, character_kind=None, include_character=True):
     description = (scene.get("visual_description") or "").strip()
     action = (scene.get("action") or "").strip()
     seed = _seed(scene)
     sky, grass, sun = PALETTES[seed % len(PALETTES)]
+    stage_text, stage_sky, stage_ground = _scene_stage(scene)
+    if stage_sky:
+        sky = stage_sky
+    if stage_ground:
+        grass = stage_ground
     image = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT))
     draw = ImageDraw.Draw(image)
     _gradient(draw, sky, "#FFF4D6")
@@ -158,7 +229,7 @@ def _create_scene_image(scene, character_kind=None, include_character=True):
         for dx, dy, r in ((0, 12, 42), (45, 0, 52), (88, 14, 38)):
             draw.ellipse((x + dx - r, y + dy - r, x + dx + r, y + dy + r), fill="#FFFFFF")
 
-    lower = (description + " " + action).lower()
+    lower = (description + " " + action + " " + stage_text).lower()
     has_tree = any(word in lower for word in ("tree", "forest", "garden"))
     tree_x = [110, VIDEO_WIDTH - 150] if has_tree else [90, VIDEO_WIDTH - 110]
     for x in tree_x:
@@ -172,7 +243,7 @@ def _create_scene_image(scene, character_kind=None, include_character=True):
             draw.ellipse((x - 12, horizon - 40, x + 2, horizon - 26), fill="#FF7BA5")
             draw.ellipse((x + 1, horizon - 40, x + 15, horizon - 26), fill="#FFD166")
 
-    if "path" in lower or "road" in lower:
+    _draw_story_props(draw, lower, horizon)\n\n    if "path" in lower or "road" in lower:
         draw.polygon(
             [(VIDEO_WIDTH // 2 - 35, VIDEO_HEIGHT), (VIDEO_WIDTH // 2 + 35, VIDEO_HEIGHT),
              (VIDEO_WIDTH // 2 + 170, horizon), (VIDEO_WIDTH // 2 - 170, horizon)],
@@ -180,10 +251,11 @@ def _create_scene_image(scene, character_kind=None, include_character=True):
         )
 
     # Semantic action changes position/pose slightly so consecutive scenes are not identical.
-    cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
-    ground = int(VIDEO_HEIGHT * 0.73)
+    px, py, scale = _story_character_position(scene, 0)
+    cx = int(px)
+    ground = int(VIDEO_HEIGHT * py)
     if include_character:
-        _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
+        _character(draw, cx, ground, character_kind or _kind(description + " " + action), scale, 0)
 
     for i in range(16):
         x = (seed * (i + 3) * 17) % VIDEO_WIDTH
@@ -200,9 +272,10 @@ def _create_character_layer(scene, character_kind=None):
     seed = _seed(scene)
     layer = Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    cx = VIDEO_WIDTH // 2 + ((seed % 9) - 4) * 55
-    ground = int(VIDEO_HEIGHT * 0.73)
-    _character(draw, cx, ground, character_kind or _kind(description + " " + action), 1.15, 0)
+    px, py, scale = _story_character_position(scene, 0)
+    cx = int(px)
+    ground = int(VIDEO_HEIGHT * py)
+    _character(draw, cx, ground, character_kind or _kind(description + " " + action), scale, 0)
     return layer.filter(ImageFilter.SMOOTH)
 
 
