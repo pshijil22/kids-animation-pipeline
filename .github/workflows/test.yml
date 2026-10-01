@@ -26,7 +26,7 @@ jobs:
       - name: Install free local tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg curl blender espeak-ng
+          sudo apt-get install -y ffmpeg curl blender espeak-ng libegl1 libgl1 libx11-6 libxi6 libxrender1
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
           pip install flake8
