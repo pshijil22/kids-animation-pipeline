@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 VIDEOS_DIR = DATA_DIR / "videos"
 SHOTS_DIR = DATA_DIR / "generated_shots"
-BLENDER_FPS = int(os.getenv("BLENDER_RENDER_FPS", "6"))
+BLENDER_FPS = int(os.getenv("BLENDER_RENDER_FPS", "5"))
 BLENDER_WIDTH = int(os.getenv("BLENDER_RENDER_WIDTH", "640"))
 BLENDER_HEIGHT = int(os.getenv("BLENDER_RENDER_HEIGHT", "360"))
 MIN_SECONDS = 1470
@@ -164,7 +164,7 @@ def _blender_render():
 
     story = json.loads(Path(_arg("--story")).read_text(encoding="utf-8"))
     output = Path(_arg("--output"))
-    fps = int(_arg("--fps", "6"))
+    fps = int(_arg("--fps", "5"))
     width = int(_arg("--width", "640"))
     height = int(_arg("--height", "360"))
     scenes = story["scenes"]
