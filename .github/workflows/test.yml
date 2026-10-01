@@ -61,7 +61,7 @@ jobs:
           VIDEO_MAXRATE: '1600k'
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: slow
-          BLENDER_RENDER_FPS: '6'
+          BLENDER_RENDER_FPS: '5'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
           TTS_ENGINE: espeak-ng
