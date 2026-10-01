@@ -27,20 +27,49 @@ MAX_SECONDS = 1830
 
 
 def _run_blender(story_file, output_file):
+    """Render a long movie as frames, then encode it with FFmpeg."""
     blender = shutil.which("blender")
-    if not blender:
-        raise RuntimeError("Blender is not installed on the runner.")
+    ffmpeg = shutil.which("ffmpeg")
+    if not blender or not ffmpeg:
+        raise RuntimeError("Blender and FFmpeg must be installed on the runner.")
+
+    frames_dir = output_file.with_name(output_file.stem + "_frames")
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    frame_pattern = frames_dir / "frame_####"
     command = [
         blender, "--background", "--enable-autoexec", "--python", str(Path(__file__).resolve()),
         "--", "--free-blender-render", "--story", str(story_file.resolve()),
-        "--output", str(output_file.resolve()), "--fps", str(BLENDER_FPS),
+        "--output", str(frame_pattern.resolve()), "--fps", str(BLENDER_FPS),
         "--width", str(BLENDER_WIDTH), "--height", str(BLENDER_HEIGHT),
     ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=5 * 60 * 60)
     if result.returncode != 0:
-        logger.error(result.stdout[-4000:])
-        logger.error(result.stderr[-4000:])
-        raise RuntimeError("Free Blender movie render failed")
+        logger.error(result.stdout[-6000:])
+        logger.error(result.stderr[-6000:])
+        raise RuntimeError("Free Blender frame render failed")
+
+    frames = sorted(frames_dir.glob("frame_*.jpg"))
+    if len(frames) < 100 or not (frames_dir / "frame_0001.jpg").exists():
+        logger.error("Blender stdout: %s", result.stdout[-4000:])
+        logger.error("Blender stderr: %s", result.stderr[-6000:])
+        raise RuntimeError(f"Blender produced only {len(frames)} usable frames")
+
+    encode = [
+        ffmpeg, "-y", "-loglevel", "warning",
+        "-framerate", str(BLENDER_FPS), "-start_number", "1",
+        "-i", str(frames_dir / "frame_%04d.jpg"),
+        "-c:v", "libx264", "-preset", os.getenv("VIDEO_PRESET", "slow"),
+        "-b:v", os.getenv("VIDEO_BITRATE", "1400k"),
+        "-maxrate", os.getenv("VIDEO_MAXRATE", "1600k"),
+        "-bufsize", os.getenv("VIDEO_BUFSIZE", "3200k"),
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output_file),
+    ]
+    encoded = subprocess.run(encode, capture_output=True, text=True, timeout=2 * 60 * 60)
+    if encoded.returncode != 0 or not output_file.exists():
+        logger.error("FFmpeg stdout: %s", encoded.stdout[-4000:])
+        logger.error("FFmpeg stderr: %s", encoded.stderr[-6000:])
+        raise RuntimeError("FFmpeg could not assemble the Blender frame sequence")
+    shutil.rmtree(frames_dir, ignore_errors=True)
 
 
 def _concat_audio_video(video, narration, subtitles, output):
@@ -190,11 +219,9 @@ def _blender_render():
     scene.render.resolution_y = height
     scene.render.resolution_percentage = 100
     scene.render.fps = fps
-    scene.render.image_settings.file_format = "FFMPEG"
-    scene.render.ffmpeg.format = "MPEG4"
-    scene.render.ffmpeg.codec = "H264"
-    scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
-    scene.render.ffmpeg.audio_codec = "NONE"
+    scene.render.image_settings.file_format = "JPEG"
+    scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.quality = 85
     scene.render.filepath = str(output)
     scene.render.film_transparent = False
     scene.frame_start = 1
@@ -341,8 +368,11 @@ def _blender_render():
                     kp.interpolation = "BEZIER"
 
     scene.frame_set(1)
-    bpy.ops.wm.save_as_mainfile(filepath=str(output.with_suffix(".blend")))
-    bpy.ops.render.render(animation=True)
+    blend_file = output.parent / "scene.blend"
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend_file))
+    result = bpy.ops.render.render(animation=True)
+    if "FINISHED" not in result:
+        raise RuntimeError(f"Blender animation render did not finish: {result}")
 
 
 if "--free-blender-render" in sys.argv:
