@@ -214,7 +214,15 @@ def _blender_render():
     bpy.ops.object.delete(use_global=False)
 
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    # Support both Blender 4.0 and newer Eevee engine names.
+    engine_items = scene.render.bl_rna.properties["engine"].enum_items
+    available_engines = {item.identifier for item in engine_items}
+    if "BLENDER_EEVEE_NEXT" in available_engines:
+        scene.render.engine = "BLENDER_EEVEE_NEXT"
+    elif "BLENDER_EEVEE" in available_engines:
+        scene.render.engine = "BLENDER_EEVEE"
+    else:
+        raise RuntimeError(f"No Eevee engine available; found {sorted(available_engines)}")
     scene.render.resolution_x = width
     scene.render.resolution_y = height
     scene.render.resolution_percentage = 100
