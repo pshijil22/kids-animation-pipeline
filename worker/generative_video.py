@@ -208,22 +208,45 @@ def _blender_render():
         dur=float(sc.get("duration_seconds",SCENE_SECONDS)); start=frame; end=frame+int(dur*fps)-1; third=max(1,(end-start+1)//3)
         beats=sc.get("visual_beats") or []
         while len(beats)<3: beats.append({"action":sc.get("action",""),"prop":sc.get("props",""),"camera":sc.get("camera",""),"subject":sc.get("character_actions","")})
-        action="%s %s"%(sc.get("action",""),sc.get("character_actions",""))
-        for idx,h in enumerate(heroes): animate(h,action,sc.get("emotion","curious"),start,end,idx)
-        prop=prop_for(" ".join(str(beats[0].get(k,"")) for k in ("action","prop","narration_line")),prop_mats)
-        prop_obj=make_prop(prop,prop_mats)
-        if prop_obj:
-            prop_obj.location=(.9,-.15,.55); prop_obj.keyframe_insert("location",frame=start)
-            prop_obj.location=(-.1,-.65,.8); prop_obj.keyframe_insert("location",frame=start+third)
-            prop_obj.location=(.75,-.35,1.0); prop_obj.keyframe_insert("location",frame=end)
-            if "open" in action.lower() or "reveal" in action.lower(): key(prop_obj,start+third,rot=(0,math.radians(35),0)); key(prop_obj,end,rot=(0,math.radians(75),0))
         for bidx,beat in enumerate(beats[:3]):
-            bs=start+bidx*third; be=end if bidx==2 else start+(bidx+1)*third-1
-            beat_text=" ".join(str(beat.get(k,"")) for k in ("narration_line","subject","action","prop"))
-            style=str(beat.get("camera") or sc.get("camera") or "")
+            bs=start+bidx*third
+            be=end if bidx==2 else start+(bidx+1)*third-1
+            beat_text=" ".join(
+                str(beat.get(k,""))
+                for k in ("narration_line","subject","action","prop")
+            )
+            beat_action=str(beat.get("action") or sc.get("action") or "")
+            beat_subject=str(beat.get("subject") or sc.get("character_actions") or "")
+            beat_emotion=str(sc.get("emotion") or "curious")
+            # Animate the actual action described by this beat, rather than
+            # applying one generic scene animation to all three shots.
+            for idx,h in enumerate(heroes):
+                animate(h, beat_action + " " + beat_subject, beat_emotion, bs, be, idx)
+            # Give each beat its own concrete story prop. This prevents a key,
+            # box, map, etc. from becoming one unrelated object for the whole
+            # scene and lets each narration line have a corresponding visual.
+            beat_kind=prop_for(beat_text, prop_mats)
+            beat_prop=make_prop(beat_kind, prop_mats)
             target=(-.2+(i%3)*.4,-.35,1.8)
-            if any(w in beat_text.lower() for w in ("prop","box","key","map","book","ball","flower","shell","lantern")): target=(.25,-.4,.9)
-            shot(style,bs,be,target,shot_no); shot_no+=1
+            if beat_prop:
+                beat_prop.location=(.15,-.55,.55)
+                beat_prop.keyframe_insert("location",frame=bs)
+                beat_prop.location=(.25,-.25,.85)
+                beat_prop.keyframe_insert("location",frame=be)
+                beat_prop.scale=(1,1,1)
+                beat_prop.keyframe_insert("scale",frame=bs)
+                beat_prop.scale=(1.08,1.08,1.08)
+                beat_prop.keyframe_insert("scale",frame=be)
+                if any(w in beat_action.lower() for w in ("open","reveal","turn","lift")):
+                    key(beat_prop,bs,rot=(0,0,math.radians(-8)))
+                    key(beat_prop,be,rot=(0,math.radians(35),math.radians(8)))
+                target=(.25,-.4,.9)
+            # Point the shot at the subject when the beat is character-led;
+            # point it at the prop when the narration names a concrete object.
+            if not beat_kind:
+                target=(-.2+(i%3)*.4,-.35,1.8)
+            shot(str(beat.get("camera") or sc.get("camera") or ""),bs,be,target,shot_no)
+            shot_no+=1
         frame=end+1
     for o in list(bpy.data.objects):
         if o.animation_data and o.animation_data.action:
