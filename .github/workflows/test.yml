@@ -76,7 +76,7 @@ jobs:
           test -n "$file"
           duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
           width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
-          height=$(ffprobe -error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
+          height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
           audio=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$file")
           echo "Cinematic proof: $file"
           echo "Duration: $duration"
