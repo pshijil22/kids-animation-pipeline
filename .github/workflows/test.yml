@@ -26,6 +26,7 @@ jobs:
           sudo apt-get install -y ffmpeg curl blender espeak-ng libegl1 libgl1 libx11-6 libxi6 libxrender1
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
+          pip install piper-tts
           pip install flake8
       - name: Start Ollama model
         run: |
@@ -62,8 +63,9 @@ jobs:
           BLENDER_RENDER_FPS: '12'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
-          TTS_ENGINE: espeak-ng
+          TTS_ENGINE: piper
           TTS_VOICE: en-us
+          PIPER_MODEL: en_US-lessac-medium
           TTS_RATE: '155'
           TTS_PITCH: '50'
           YOUTUBE_UPLOAD: 'false'

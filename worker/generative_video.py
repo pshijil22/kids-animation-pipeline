@@ -116,6 +116,39 @@ def _blender_render():
     for x,y,s in [(-5,1,1),(4,3,.8),(8,-2,1.1),(-8,-3,.65)]: sphere("Rock",(x,y,.02),(s,s*.7,s*.4),rock)
     for y in (-7,-8.2,-9.4): curve("Wave",[(-14,y,0),(-7,y+.35,.08),(0,y,.02),(7,y-.3,.08),(14,y,0)],.045,white)
 
+
+    def prop_for(text, material_map):
+        t=(text or "").lower()
+        choices=[
+            (("box","chest","treasure"),"box"),(("key",),"key"),(("map","paper","letter"),"map"),
+            (("book","storybook"),"book"),(("ball","toy"),"ball"),(("flower","rose","plant"),"flower"),
+            (("shell",),"shell"),(("lantern","lamp"),"lantern"),(("boat","ship"),"boat"),
+            (("kite",),"kite"),(("apple","fruit"),"apple"),(("cookie","cake"),"cookie"),
+            (("backpack","bag"),"backpack"),(("bridge",),"bridge"),(("star","moon"),"star"),
+            (("stick","branch"),"stick"),(("stone","rock","pebble"),"stone")
+        ]
+        for words,kind in choices:
+            if any(w in t for w in words): return kind
+        return None
+    def make_prop(kind,materials):
+        if not kind: return None
+        wood,metal,blue,red,yellow,green=materials
+        if kind=="box": return sphere("StoryBox",(0,0,.65),(.62,.52,.45),wood)
+        if kind=="key": return curve("StoryKey",[(-.45,0,.65),(.2,0,.65),(.35,0,.82)],.07,metal)
+        if kind=="map": return sphere("StoryMap",(0,0,.5),(.7,.08,.5),yellow)
+        if kind=="book": return sphere("StoryBook",(0,0,.55),(.55,.32,.12),red)
+        if kind in ("ball","apple","cookie","stone","shell"): return sphere("StoryObject",(0,0,.6),(.38,.38,.38),red if kind=="apple" else yellow if kind=="cookie" else blue)
+        if kind=="flower": return curve("StoryFlower",[(0,0,.2),(0,0,.8),(0,0,1.2)],.035,green)
+        if kind=="lantern": return sphere("StoryLantern",(0,0,.8),(.3,.3,.5),yellow)
+        if kind=="boat": return sphere("StoryBoat",(0,-1,.2),(1.2,.45,.25),blue)
+        if kind=="kite": return curve("StoryKite",[(0,0,1),(0,0,2)],.025,red)
+        if kind=="backpack": return sphere("StoryBag",(0,.35,1),(.55,.25,.65),blue)
+        if kind=="bridge": return curve("StoryBridge",[(-2,0,.3),(0,0,.7),(2,0,.3)],.22,wood)
+        if kind=="star": return sphere("StoryStar",(0,0,1.3),(.25,.25,.25),yellow)
+        if kind=="stick": return curve("StoryStick",[(-.5,0,.5),(.5,0,.8)],.08,wood)
+        return None
+    prop_mats=(wood,rock,water,white,leaf,sand)
+
     def light(name,energy,size,loc,color):
         d=bpy.data.lights.new(name,"AREA"); d.energy=energy; d.shape="DISK"; d.size=size; d.color=color
         o=bpy.data.objects.new(name,d); bpy.context.collection.objects.link(o); o.location=loc; return o
@@ -173,12 +206,24 @@ def _blender_render():
     frame=1; shot_no=0
     for i,sc in enumerate(scenes):
         dur=float(sc.get("duration_seconds",SCENE_SECONDS)); start=frame; end=frame+int(dur*fps)-1; third=max(1,(end-start+1)//3)
+        beats=sc.get("visual_beats") or []
+        while len(beats)<3: beats.append({"action":sc.get("action",""),"prop":sc.get("props",""),"camera":sc.get("camera",""),"subject":sc.get("character_actions","")})
         action="%s %s"%(sc.get("action",""),sc.get("character_actions",""))
         for idx,h in enumerate(heroes): animate(h,action,sc.get("emotion","curious"),start,end,idx)
-        target=(-.15+(i%3)*.35,-.25,1.8)
-        shot("wide "+str(sc.get("camera","")),start,start+third-1,target,shot_no); shot_no+=1
-        shot("action "+str(sc.get("camera","")),start+third,start+2*third-1,(target[0]+.2,-.2,1.7),shot_no); shot_no+=1
-        shot("close reaction",start+2*third,end,(target[0],-.35,2.05),shot_no); shot_no+=1
+        prop=prop_for(" ".join(str(beats[0].get(k,"")) for k in ("action","prop","narration_line")),prop_mats)
+        prop_obj=make_prop(prop,prop_mats)
+        if prop_obj:
+            prop_obj.location=(.9,-.15,.55); prop_obj.keyframe_insert("location",frame=start)
+            prop_obj.location=(-.1,-.65,.8); prop_obj.keyframe_insert("location",frame=start+third)
+            prop_obj.location=(.75,-.35,1.0); prop_obj.keyframe_insert("location",frame=end)
+            if "open" in action.lower() or "reveal" in action.lower(): key(prop_obj,start+third,rot=(0,math.radians(35),0)); key(prop_obj,end,rot=(0,math.radians(75),0))
+        for bidx,beat in enumerate(beats[:3]):
+            bs=start+bidx*third; be=end if bidx==2 else start+(bidx+1)*third-1
+            beat_text=" ".join(str(beat.get(k,"")) for k in ("narration_line","subject","action","prop"))
+            style=str(beat.get("camera") or sc.get("camera") or "")
+            target=(-.2+(i%3)*.4,-.35,1.8)
+            if any(w in beat_text.lower() for w in ("prop","box","key","map","book","ball","flower","shell","lantern")): target=(.25,-.4,.9)
+            shot(style,bs,be,target,shot_no); shot_no+=1
         frame=end+1
     for o in list(bpy.data.objects):
         if o.animation_data and o.animation_data.action:

@@ -114,7 +114,7 @@ For ACT 1, BATCH 1 return:
   "duration_seconds":1650,
   "characters":[{{"name":"...","species":"...","appearance":"...","personality":"..."}}],
   "acts":[{{"number":1,"title":"..."}},{{"number":2,"title":"..."}},{{"number":3,"title":"..."}},{{"number":4,"title":"..."}},{{"number":5,"title":"..."}}],
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","visual_beats":[{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."},{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."},{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}],"location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
 }}
 
 For every other batch return:
@@ -214,6 +214,10 @@ def repair_story_json(story):
         scene.setdefault("title", f"Scene {i}")
         scene.setdefault("narration", "The adventure continues as everyone works together.")
         scene.setdefault("visual_description", "A cinematic 3D animated-feature scene with the recurring characters.")
+        beats = scene.get("visual_beats")
+        if not isinstance(beats, list) or len(beats) < 3:
+            beats = [{"narration_line":scene.get("narration",""),"subject":scene.get("character_actions",""),"action":scene.get("action",""),"prop":scene.get("props",""),"camera":scene.get("camera","")} for _ in range(3)]
+        scene["visual_beats"] = beats[:3]
         scene.setdefault("location", "the established story world")
         scene.setdefault("time_of_day", "day")
         scene.setdefault("action", "The characters move together and discover something new.")

@@ -11,7 +11,7 @@ EPISODE DESIGN
   teamwork, a satisfying resolution and one simple positive lesson.
 - Use 1-2 main recurring characters and keep their names, species and appearance EXACTLY consistent.
 - Reuse locations and props so scenes feel like one coherent 3D animated world.
-- Every scene must have a different visible action or meaningful progression.
+- Every scene must have a different visible action or meaningful progression.\n- Break every scene into exactly 3 visual beats that correspond to the narration: setup, action, and reaction/payoff.\n- Each visual beat must name the subject, exact physical action, relevant prop/object, and camera idea. Never use a generic filler visual when the narration names a concrete object or action.
 - Treat every scene like a cinematic 3D animated-feature shot: establish the location, stage the characters,
   show the specific action, then choose a camera move that supports the story beat.
 - Vary wide, medium, close-up, over-the-shoulder, tracking, pan and push/pull camera ideas according to the action.
@@ -36,3 +36,7 @@ VISUALS
 - Do not describe the scenes as 2D artwork.
 
 Return ONLY valid JSON in the exact structure requested by the act-generation instruction.
+
+
+VISUAL BEATS JSON RULE
+For every scene return visual_beats with EXACTLY 3 objects. Each object must contain narration_line, subject, action, prop, camera. The narration_line must be the portion of narration represented by that beat. The action must be physically animatable in Blender (open, close, pick up, put down, look, point, run, jump, hide, reveal, push, pull, carry, climb, wave, etc.). The prop must be a concrete object when one exists in the story, otherwise an empty string. The three beats must visibly progress rather than repeat the same background.
