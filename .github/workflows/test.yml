@@ -45,7 +45,7 @@ jobs:
           cd worker
           python -m compileall -q .
           python -c "from pipeline import generate_story; print('Pipeline OK')"
-      - name: Generate cinematic proof
+      - name: Generate full animated movie
         env:
           OLLAMA_URL: http://localhost:11434
           OLLAMA_MODEL: llama3.2:3b
@@ -57,22 +57,21 @@ jobs:
           VIDEO_MAXRATE: '1600k'
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: slow
-          CINEMATIC_PREVIEW: 'true'
-          CINEMATIC_PREVIEW_SCENES: '6'
-          CINEMATIC_SCENE_SECONDS: '15'
+          CINEMATIC_PREVIEW: 'false'
+          CINEMATIC_SCENE_SECONDS: '16.5'
           BLENDER_RENDER_FPS: '12'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
           TTS_ENGINE: piper
           TTS_VOICE: en-us
-          PIPER_MODEL: en_US-lessac-medium
+          PIPER_MODEL: en_US-lessac-high
           TTS_RATE: '155'
           TTS_PITCH: '50'
           YOUTUBE_UPLOAD: 'false'
         run: |
           cd worker
           python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
-      - name: Cinematic proof quality check
+      - name: Full movie quality check
         run: |
           file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
           test -n "$file"
@@ -80,19 +79,19 @@ jobs:
           width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
           height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
           audio=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$file")
-          echo "Cinematic proof: $file"
+          echo "Full movie: $file"
           echo "Duration: $duration"
           echo "Resolution: $width x $height"
           echo "Audio: $audio"
-          python -c "d=float('$duration'); assert 80 <= d <= 110, 'Invalid proof duration: %ss' % d"
+          python -c "d=float('$duration'); assert 1470 <= d <= 1830, 'Invalid movie duration: %ss' % d"
           test "$width" = "1920"
           test "$height" = "1080"
           test "$audio" = "aac"
-          test "$(stat -c%s "$file")" -lt 180000000
-      - name: Upload cinematic proof artifact
+          test "$(stat -c%s "$file")" -lt 450000000
+      - name: Upload full movie artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cinematic-proof-of-quality
+          name: kids-animated-movie
           path: worker/data/videos/*.mp4
           if-no-files-found: error
           retention-days: 30

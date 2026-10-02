@@ -1,7 +1,7 @@
 """Long-form story generation for the kids animation pipeline.
 
-The LLM is called in five smaller act requests instead of one giant JSON response.
-This keeps output reliable while still producing a single coherent 25-30 minute episode.
+Generate the complete 100-scene episode in small, coherent batches so the
+local LLM does not time out while preserving the full 25-30 minute plan.
 """
 import asyncio
 import json
@@ -18,9 +18,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 MIN_SECONDS = 1500
 MAX_SECONDS = 1800
 SCENES_PER_ACT = 20
-SCENES_PER_BATCH = 10
-PREVIEW = os.getenv("CINEMATIC_PREVIEW", "true").lower() == "true"
-PREVIEW_SCENES = int(os.getenv("CINEMATIC_PREVIEW_SCENES", "6"))
+SCENES_PER_BATCH = 5
 
 
 async def wait_for_ollama(max_retries=180, delay=1):
@@ -36,7 +34,11 @@ async def wait_for_ollama(max_retries=180, delay=1):
 
 
 def _prompt_file():
-    paths = [Path("/app/prompts/story.txt"), Path("./prompts/story.txt"), Path("../prompts/story.txt")]
+    paths = [
+        Path("/app/prompts/story.txt"),
+        Path("./prompts/story.txt"),
+        Path("../prompts/story.txt"),
+    ]
     path = next((p for p in paths if p.exists()), None)
     if not path:
         raise FileNotFoundError(f"Prompt file not found: {paths}")
@@ -53,7 +55,7 @@ def _extract_json(raw):
         return json.loads(match.group(0))
 
 
-async def _ask_ollama(prompt, timeout=900):
+async def _ask_ollama(prompt, timeout=600):
     response = requests.post(
         f"{OLLAMA_URL}/api/generate",
         json={
@@ -61,7 +63,11 @@ async def _ask_ollama(prompt, timeout=900):
             "prompt": prompt,
             "stream": False,
             "format": "json",
-            "options": {"num_ctx": 16384, "temperature": 0.7},
+            "options": {
+                "num_ctx": 8192,
+                "num_predict": 6000,
+                "temperature": 0.7,
+            },
         },
         timeout=timeout,
     )
@@ -72,6 +78,44 @@ async def _ask_ollama(prompt, timeout=900):
     return _extract_json(text)
 
 
+def _scene_schema(start_number, batch_size, include_episode):
+    episode = ""
+    if include_episode:
+        episode = """
+For the first batch also return title, description, lesson, age_range,
+characters and the five acts. Characters must be reusable and visually
+specific so the Blender renderer can keep them consistent.
+"""
+    return f"""
+Return ONLY valid JSON.
+{episode}
+Return a "scenes" array containing EXACTLY {batch_size} scene objects.
+The scene numbers must run from {start_number} through
+{start_number + batch_size - 1}.
+
+Every scene object MUST contain:
+number, act, title, narration, visual_description, visual_beats,
+location, time_of_day, action, character_actions, props, emotion, camera,
+motion, continuity, duration_seconds.
+
+visual_beats MUST contain EXACTLY 3 objects. Each beat MUST contain:
+narration_line, subject, action, prop, camera.
+
+The three beats must represent three different moments from the same
+scene: setup, physical action/discovery, and reaction/payoff. The
+narration_line must be the actual portion of narration represented.
+Do not repeat the same action, camera or background for all three beats.
+If narration says a character finds a key, show approaching/searching,
+the key being noticed/picked up, and the character reacting to it.
+If narration says a character opens a box, show reaching/opening, the
+lid changing state, and the reaction to what is revealed.
+
+Each scene's narration should be 38-45 natural spoken words. It must
+advance the story rather than describe a generic picture. Every concrete
+noun or action in narration should have a matching visual beat.
+"""
+
+
 async def generate_story_with_llm():
     await wait_for_ollama()
     base = _prompt_file().read_text(encoding="utf-8")
@@ -79,115 +123,121 @@ async def generate_story_with_llm():
     scenes = []
     characters = []
 
-    total_scenes = PREVIEW_SCENES if PREVIEW else 100
-    acts_to_generate = 1 if PREVIEW else 5
-    batches_per_act = 1 if PREVIEW else 2
-    for act in range(1, acts_to_generate + 1):
-        for batch in range(batches_per_act):
-            batch_size = min(SCENES_PER_BATCH, total_scenes - len(scenes))
-            if batch_size <= 0:
-                break
-            start_number = len(scenes) + 1
-            recent = scenes[-3:] if scenes else []
-            context = json.dumps(
-                {"characters": characters, "recent_scenes": recent, "next_act": act},
-                ensure_ascii=False,
-            )
-            prompt = f"""
+    total_scenes = 100
+    total_batches = total_scenes // SCENES_PER_BATCH
+
+    for batch_index in range(total_batches):
+        act = (batch_index // (SCENES_PER_ACT // SCENES_PER_BATCH)) + 1
+        start_number = len(scenes) + 1
+        batch_size = min(SCENES_PER_BATCH, total_scenes - len(scenes))
+        recent = scenes[-4:] if scenes else []
+        context = json.dumps(
+            {
+                "characters": characters,
+                "recent_scenes": recent,
+                "next_act": act,
+                "completed_scene_count": len(scenes),
+            },
+            ensure_ascii=False,
+        )
+        include_episode = batch_index == 0
+        prompt = f"""
 {base}
 
-You are generating ACT {act} of 5, BATCH {batch + 1} of 2.
-Generate EXACTLY {batch_size} scenes in this batch.
-This run must contain {total_scenes} scenes.
-This batch covers scene numbers {start_number} through {start_number + batch_size - 1}.
+You are generating the complete episode in ACT {act} of 5.
+This is batch {batch_index + 1} of {total_batches}.
+The episode MUST remain exactly 100 scenes and 25-30 minutes long.
 
-Continuity context from earlier scenes:
+{_scene_schema(start_number, batch_size, include_episode)}
+
+Continuity context from the preceding scenes:
 {context}
 
-For ACT 1, BATCH 1, create the title, description, lesson, age_range, characters and acts.
-For all other batches, keep the same characters, setting, story premise and lesson.
-Do not rename characters or change their appearance.
-
-Each scene must contain 38-45 natural spoken words, a concrete visible action,
-and useful visual details. The scene duration target is about 15-18 seconds.
-Return ONLY valid JSON.
-
-For ACT 1, BATCH 1 return:
-{{
-  "title":"...",
-  "description":"...",
-  "lesson":"...",
-  "age_range":"4-8",
-  "target_duration_seconds":1650,
-  "duration_seconds":1650,
-  "characters":[{{"name":"...","species":"...","appearance":"...","personality":"..."}}],
-  "acts":[{{"number":1,"title":"..."}},{{"number":2,"title":"..."}},{{"number":3,"title":"..."}},{{"number":4,"title":"..."}},{{"number":5,"title":"..."}}],
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","visual_beats":[{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}},{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}},{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}}],"location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
-}}
-
-For every other batch return:
-{{
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
-}}
+Story requirements for this batch:
+- Continue the same central problem and character goals.
+- Escalate the adventure gently; do not reset the story.
+- Preserve character names, species, appearance and personality.
+- Preserve important props and locations when continuity requires them.
+- Introduce new visible events rather than filler travel scenes.
+- Act 1 establishes the hook and goal; Acts 2-4 develop discoveries,
+  obstacles and teamwork; Act 5 resolves the goal and lands the lesson.
+- Make every scene visually distinct and physically animatable in Blender.
+- Keep all events warm, funny, adventurous and age-appropriate.
 """
-            logger.info("Generating story act %s/5 batch %s/2...", act, batch + 1)
+        logger.info(
+            "Generating story batch %s/%s (act %s, scenes %s-%s)",
+            batch_index + 1,
+            total_batches,
+            act,
+            start_number,
+            start_number + batch_size - 1,
+        )
 
-            # LLMs can occasionally return valid JSON with an empty/short scenes
-            # array. Retry the same batch with a progressively stricter instruction
-            # instead of throwing away the entire 25-30 minute production.
-            result = None
-            act_scenes = []
-            for attempt in range(1, 4):
-                retry_prompt = prompt
-                if attempt > 1:
-                    retry_prompt += f"""
-IMPORTANT RETRY {attempt}/3:
-Your previous response did not contain {batch_size} usable scenes.
-Return ONLY a JSON object with a "scenes" array containing EXACTLY
-{batch_size} complete scene objects for this batch. Do not return an
-empty array. Do not summarize. Do not omit any scene.
+        result = None
+        act_scenes = []
+        for attempt in range(1, 4):
+            retry_prompt = prompt
+            if attempt > 1:
+                retry_prompt += f"""
+RETRY {attempt}/3: The previous response was incomplete.
+Return ONLY one JSON object with exactly {batch_size} complete scenes.
+Do not summarize, omit, merge, or invent a different scene count.
+Every scene must include exactly three visual_beats with concrete actions.
 """
-                try:
-                    result = await _ask_ollama(retry_prompt)
-                    act_scenes = result.get("scenes", []) if isinstance(result, dict) else []
-                    if len(act_scenes) >= batch_size:
-                        break
-                    logger.warning(
-                        "Act %s batch %s attempt %s returned %s scenes; retrying",
-                        act, batch + 1, attempt, len(act_scenes)
-                    )
-                except (ValueError, requests.RequestException) as exc:
-                    logger.warning(
-                        "Act %s batch %s attempt %s failed: %s; retrying",
-                        act, batch + 1, attempt, exc
-                    )
-                    if attempt == 3:
-                        raise
-
-            if len(act_scenes) < SCENES_PER_BATCH:
-                raise ValueError(
-                    f"Act {act} batch {batch + 1} must contain at least "
-                    f"{batch_size} scenes after 3 attempts; received {len(act_scenes)}"
+            try:
+                result = await _ask_ollama(retry_prompt)
+                act_scenes = result.get("scenes", []) if isinstance(result, dict) else []
+                if len(act_scenes) >= batch_size:
+                    break
+                logger.warning(
+                    "Batch %s attempt %s returned %s scenes; retrying",
+                    batch_index + 1,
+                    attempt,
+                    len(act_scenes),
                 )
-            act_scenes = act_scenes[:batch_size]
-            for offset, scene in enumerate(act_scenes):
-                if isinstance(scene, dict):
-                    scene["number"] = start_number + offset
-                    scene["act"] = act
-            if act == 1 and batch == 0:
-                story = {
-                    "title": result.get("title", "A New Adventure"),
-                    "description": result.get("description", "An original adventure for children."),
-                    "lesson": result.get("lesson", "Kindness and teamwork help us solve problems."),
-                    "age_range": result.get("age_range", "4-8"),
-                    "target_duration_seconds": 1650,
-                    "duration_seconds": 1650,
-                    "characters": result.get("characters", []),
-                    "acts": result.get("acts", []),
-                }
-                characters = story["characters"]
-            scenes.extend(act_scenes)
+            except (ValueError, requests.RequestException) as exc:
+                logger.warning(
+                    "Batch %s attempt %s failed: %s; retrying",
+                    batch_index + 1,
+                    attempt,
+                    exc,
+                )
+                if attempt == 3:
+                    raise
 
+        if len(act_scenes) < batch_size:
+            raise ValueError(
+                f"Batch {batch_index + 1} needs {batch_size} scenes; "
+                f"received {len(act_scenes)}"
+            )
+
+        act_scenes = act_scenes[:batch_size]
+        for offset, scene in enumerate(act_scenes):
+            if isinstance(scene, dict):
+                scene["number"] = start_number + offset
+                scene["act"] = act
+
+        if include_episode:
+            story = {
+                "title": result.get("title", "A New Adventure"),
+                "description": result.get(
+                    "description", "An original adventure for children."
+                ),
+                "lesson": result.get(
+                    "lesson", "Kindness and teamwork help us solve problems."
+                ),
+                "age_range": result.get("age_range", "4-8"),
+                "target_duration_seconds": 1650,
+                "duration_seconds": 1650,
+                "characters": result.get("characters", []),
+                "acts": result.get("acts", []),
+            }
+            characters = story["characters"]
+
+        scenes.extend(act_scenes)
+
+    if story is None or len(scenes) != total_scenes:
+        raise ValueError(f"Expected {total_scenes} generated scenes, received {len(scenes)}")
     story["scenes"] = scenes
     return json.dumps(story, ensure_ascii=False)
 
@@ -207,12 +257,18 @@ def repair_story_json(story):
     story.setdefault("acts", [])
     if not isinstance(story.get("scenes"), list) or not story["scenes"]:
         raise ValueError("Story must have a non-empty scenes array")
-    expected_scenes = PREVIEW_SCENES if PREVIEW else 100
-    if len(story["scenes"]) != expected_scenes:
-        raise ValueError(f"Story needs exactly {expected_scenes} scenes for this run; received {len(story['scenes'])}")
+    if len(story["scenes"]) != 100:
+        raise ValueError(
+            f"Story needs exactly 100 scenes for the full movie; "
+            f"received {len(story['scenes'])}"
+        )
 
-    story["duration_seconds"] = max(MIN_SECONDS, min(MAX_SECONDS, int(story.get("duration_seconds", 1650))))
-    story["target_duration_seconds"] = max(MIN_SECONDS, min(MAX_SECONDS, int(story.get("target_duration_seconds", 1650))))
+    story["duration_seconds"] = max(
+        MIN_SECONDS, min(MAX_SECONDS, int(story.get("duration_seconds", 1650)))
+    )
+    story["target_duration_seconds"] = max(
+        MIN_SECONDS, min(MAX_SECONDS, int(story.get("target_duration_seconds", 1650)))
+    )
 
     normalized = []
     for i, scene in enumerate(story["scenes"], 1):
@@ -221,33 +277,69 @@ def repair_story_json(story):
         scene["number"] = i
         scene.setdefault("act", ((i - 1) // SCENES_PER_ACT) + 1)
         scene.setdefault("title", f"Scene {i}")
-        scene.setdefault("narration", "The adventure continues as everyone works together.")
-        scene.setdefault("visual_description", "A cinematic 3D animated-feature scene with the recurring characters.")
+        scene.setdefault(
+            "narration",
+            "The adventure continues as everyone works together.",
+        )
+        scene.setdefault(
+            "visual_description",
+            "A cinematic 3D animated-feature scene with the recurring characters.",
+        )
         beats = scene.get("visual_beats")
         if not isinstance(beats, list) or len(beats) < 3:
             narration = str(scene.get("narration", "")).strip()
-            parts = [p.strip() for p in re.split(r"(?<=[.!?])\\s+", narration) if p.strip()]
+            parts = [
+                p.strip()
+                for p in re.split(r"(?<=[.!?])\s+", narration)
+                if p.strip()
+            ]
             while len(parts) < 3:
                 parts.append(narration)
             base_subject = scene.get("character_actions", "") or "the main character"
             base_action = scene.get("action", "") or "moves through the scene"
             base_prop = scene.get("props", "") or ""
             beats = [
-                {"narration_line": parts[0], "subject": base_subject, "action": "sets up the situation: " + base_action, "prop": base_prop, "camera": "establishing shot"},
-                {"narration_line": parts[1], "subject": base_subject, "action": base_action, "prop": base_prop, "camera": "action medium shot"},
-                {"narration_line": parts[2], "subject": base_subject, "action": "reacts and completes the moment: " + base_action, "prop": base_prop, "camera": "close reaction shot"},
+                {
+                    "narration_line": parts[0],
+                    "subject": base_subject,
+                    "action": "sets up the situation: " + base_action,
+                    "prop": base_prop,
+                    "camera": "establishing shot",
+                },
+                {
+                    "narration_line": parts[1],
+                    "subject": base_subject,
+                    "action": base_action,
+                    "prop": base_prop,
+                    "camera": "action medium shot",
+                },
+                {
+                    "narration_line": parts[2],
+                    "subject": base_subject,
+                    "action": "reacts and completes the moment: " + base_action,
+                    "prop": base_prop,
+                    "camera": "close reaction shot",
+                },
             ]
         scene["visual_beats"] = beats[:3]
         scene.setdefault("location", "the established story world")
         scene.setdefault("time_of_day", "day")
-        scene.setdefault("action", "The characters move together and discover something new.")
-        scene.setdefault("character_actions", scene.get("action", "The characters move together."))
+        scene.setdefault(
+            "action",
+            "The characters move together and discover something new.",
+        )
+        scene.setdefault(
+            "character_actions",
+            scene.get("action", "The characters move together."),
+        )
         scene.setdefault("props", "")
         scene.setdefault("emotion", "curious")
         scene.setdefault("camera", "medium shot")
         scene.setdefault("motion", "gentle camera movement")
         scene.setdefault("continuity", "Continue naturally from the previous shot.")
-        scene["duration_seconds"] = max(8, min(24, float(scene.get("duration_seconds", 16))))
+        scene["duration_seconds"] = max(
+            8, min(24, float(scene.get("duration_seconds", 16.5)))
+        )
         normalized.append(scene)
     story["scenes"] = normalized
     return story
