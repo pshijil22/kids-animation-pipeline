@@ -114,7 +114,7 @@ For ACT 1, BATCH 1 return:
   "duration_seconds":1650,
   "characters":[{{"name":"...","species":"...","appearance":"...","personality":"..."}}],
   "acts":[{{"number":1,"title":"..."}},{{"number":2,"title":"..."}},{{"number":3,"title":"..."}},{{"number":4,"title":"..."}},{{"number":5,"title":"..."}}],
-  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","visual_beats":[{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."},{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."},{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}],"location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
+  "scenes":[{{"number":{start_number},"act":{act},"title":"...","narration":"...","visual_description":"...","visual_beats":[{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}},{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}},{{"narration_line":"...","subject":"...","action":"...","prop":"...","camera":"..."}}],"location":"...","time_of_day":"...","action":"...","character_actions":"...","props":"...","emotion":"...","camera":"...","motion":"...","continuity":"...","duration_seconds":16}}]
 }}
 
 For every other batch return:
@@ -216,7 +216,18 @@ def repair_story_json(story):
         scene.setdefault("visual_description", "A cinematic 3D animated-feature scene with the recurring characters.")
         beats = scene.get("visual_beats")
         if not isinstance(beats, list) or len(beats) < 3:
-            beats = [{"narration_line":scene.get("narration",""),"subject":scene.get("character_actions",""),"action":scene.get("action",""),"prop":scene.get("props",""),"camera":scene.get("camera","")} for _ in range(3)]
+            narration = str(scene.get("narration", "")).strip()
+            parts = [p.strip() for p in re.split(r"(?<=[.!?])\\s+", narration) if p.strip()]
+            while len(parts) < 3:
+                parts.append(narration)
+            base_subject = scene.get("character_actions", "") or "the main character"
+            base_action = scene.get("action", "") or "moves through the scene"
+            base_prop = scene.get("props", "") or ""
+            beats = [
+                {"narration_line": parts[0], "subject": base_subject, "action": "sets up the situation: " + base_action, "prop": base_prop, "camera": "establishing shot"},
+                {"narration_line": parts[1], "subject": base_subject, "action": base_action, "prop": base_prop, "camera": "action medium shot"},
+                {"narration_line": parts[2], "subject": base_subject, "action": "reacts and completes the moment: " + base_action, "prop": base_prop, "camera": "close reaction shot"},
+            ]
         scene["visual_beats"] = beats[:3]
         scene.setdefault("location", "the established story world")
         scene.setdefault("time_of_day", "day")
