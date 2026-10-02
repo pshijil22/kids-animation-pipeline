@@ -29,7 +29,10 @@ def _run_blender(story_file,output_file):
     if result.returncode:
         logger.error(result.stdout[-5000:]); logger.error(result.stderr[-7000:]); raise RuntimeError("Blender cinematic render failed")
     frames=sorted(frames_dir.glob("frame_*.jpg"))
-    if len(frames)<max(100,FPS*8) or not (frames_dir/"frame_0001.jpg").exists(): raise RuntimeError("Blender did not produce enough frames")
+    if len(frames)<max(100,FPS*8) or not (frames_dir/"frame_0001.jpg").exists():
+        all_frames=sorted(frames_dir.glob("frame_*.*"))
+        logger.error("Blender produced %s frame files; expected JPEGs. Files: %s",len(all_frames),[p.name for p in all_frames[:20]])
+        raise RuntimeError("Blender did not produce enough frames")
     command=[ffmpeg,"-y","-loglevel","warning","-framerate",str(FPS),"-start_number","1","-i",str(frames_dir/"frame_%04d.jpg"),"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","slow"),"-b:v",os.getenv("VIDEO_BITRATE","1400k"),"-maxrate",os.getenv("VIDEO_MAXRATE","1600k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","3200k"),"-pix_fmt","yuv420p","-movflags","+faststart",str(output_file)]
     encoded=subprocess.run(command,capture_output=True,text=True,timeout=7200)
     if encoded.returncode or not output_file.exists():
@@ -100,7 +103,7 @@ def _blender_render():
     scene=bpy.context.scene; engines={x.identifier for x in scene.render.bl_rna.properties["engine"].enum_items}
     scene.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
     scene.render.resolution_x,scene.render.resolution_y=width,height; scene.render.resolution_percentage=100; scene.render.fps=fps
-    scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.filepath=str(output)
+    scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.use_file_extension=True; scene.render.filepath=str(output)+".jpg"
     scene.frame_start,scene.frame_end=1,total_frames
     try: scene.view_settings.look="AgX - Medium High Contrast"
     except Exception: pass
@@ -253,7 +256,9 @@ def _blender_render():
             for fc in o.animation_data.action.fcurves:
                 for kp in fc.keyframe_points: kp.interpolation="BEZIER"
     scene.frame_set(1); bpy.ops.wm.save_as_mainfile(filepath=str(output.parent/"scene.blend"))
+    print("CINEMATIC_RENDER_START", total_frames, fps, width, height, flush=True)
     result=bpy.ops.render.render(animation=True)
+    print("CINEMATIC_RENDER_RESULT", result, flush=True)
     if "FINISHED" not in result: raise RuntimeError("Blender animation render did not finish")
 
 if "--free-blender-render" in sys.argv:
