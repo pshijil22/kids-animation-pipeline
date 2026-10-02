@@ -6,23 +6,20 @@ on:
       - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: kids-animation-main
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install free local tools
         run: |
           sudo apt-get update
@@ -30,7 +27,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
           pip install flake8
-
       - name: Start Ollama model
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
@@ -39,16 +35,16 @@ jobs:
             curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break
             sleep 1
           done
-          curl --fail --retry 5 --retry-delay 5 -X POST http://127.0.0.1:11434/api/pull             -H 'Content-Type: application/json'             -d '{"name":"llama3.2:3b"}'
-
+          curl --fail --retry 5 --retry-delay 5 -X POST http://127.0.0.1:11434/api/pull \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"llama3.2:3b"}'
       - name: Validate pipeline
         run: |
           flake8 worker/*.py --count --select=E9,F63,F7,F82 --show-source --statistics
           cd worker
           python -m compileall -q .
           python -c "from pipeline import generate_story; print('Pipeline OK')"
-
-      - name: Generate, render and optionally publish
+      - name: Generate cinematic proof
         env:
           OLLAMA_URL: http://localhost:11434
           OLLAMA_MODEL: llama3.2:3b
@@ -56,12 +52,14 @@ jobs:
           VIDEO_WIDTH: '1920'
           VIDEO_HEIGHT: '1080'
           VIDEO_FPS: '30'
-          VIDEO_CRF: '24'
           VIDEO_BITRATE: '1400k'
           VIDEO_MAXRATE: '1600k'
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: slow
-          BLENDER_RENDER_FPS: '5'
+          CINEMATIC_PREVIEW: 'true'
+          CINEMATIC_PREVIEW_SCENES: '6'
+          CINEMATIC_SCENE_SECONDS: '15'
+          BLENDER_RENDER_FPS: '12'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
           TTS_ENGINE: espeak-ng
@@ -72,31 +70,27 @@ jobs:
         run: |
           cd worker
           python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
-
-      - name: Final quality check
+      - name: Cinematic proof quality check
         run: |
           file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
           test -n "$file"
           duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file")
           width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$file")
-          height=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
+          height=$(ffprobe -error -select_streams v:0 -show_entries stream=height -of csv=p=0 "$file")
           audio=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$file")
-          echo "Episode: $file"
-          echo "Duration: ${duration}s"
-          echo "Resolution: ${width}x${height}"
-          echo "Audio: ${audio}"
-          python -c "d=float('$duration'); assert 1470 <= d <= 1830, f'Invalid duration: {d}s'"
+          echo "Cinematic proof: $file"
+          echo "Duration: $duration"
+          echo "Resolution: $width x $height"
+          echo "Audio: $audio"
+          python -c "d=float('$duration'); assert 80 <= d <= 110, 'Invalid proof duration: %ss' % d"
           test "$width" = "1920"
           test "$height" = "1080"
           test "$audio" = "aac"
-          size=$(stat -c%s "$file")
-          echo "Size: ${size} bytes"
-          test "$size" -lt 480000000
-
-      - name: Upload episode artifact
+          test "$(stat -c%s "$file")" -lt 180000000
+      - name: Upload cinematic proof artifact
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-ready-episode
+          name: cinematic-proof-of-quality
           path: worker/data/videos/*.mp4
           if-no-files-found: error
           retention-days: 30
