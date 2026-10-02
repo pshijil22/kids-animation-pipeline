@@ -19,6 +19,8 @@ MIN_SECONDS = 1500
 MAX_SECONDS = 1800
 SCENES_PER_ACT = 20
 SCENES_PER_BATCH = 10
+PREVIEW = os.getenv("CINEMATIC_PREVIEW", "true").lower() == "true"
+PREVIEW_SCENES = int(os.getenv("CINEMATIC_PREVIEW_SCENES", "6"))
 
 
 async def wait_for_ollama(max_retries=180, delay=1):
@@ -77,9 +79,15 @@ async def generate_story_with_llm():
     scenes = []
     characters = []
 
-    for act in range(1, 6):
-        for batch in range(2):
-            start_number = (act - 1) * SCENES_PER_ACT + batch * SCENES_PER_BATCH + 1
+    total_scenes = PREVIEW_SCENES if PREVIEW else 100
+    acts_to_generate = 1 if PREVIEW else 5
+    batches_per_act = 1 if PREVIEW else 2
+    for act in range(1, acts_to_generate + 1):
+        for batch in range(batches_per_act):
+            batch_size = min(SCENES_PER_BATCH, total_scenes - len(scenes))
+            if batch_size <= 0:
+                break
+            start_number = len(scenes) + 1
             recent = scenes[-3:] if scenes else []
             context = json.dumps(
                 {"characters": characters, "recent_scenes": recent, "next_act": act},
@@ -89,9 +97,9 @@ async def generate_story_with_llm():
 {base}
 
 You are generating ACT {act} of 5, BATCH {batch + 1} of 2.
-Generate EXACTLY {SCENES_PER_BATCH} scenes in this batch.
-The complete episode must contain 100 scenes and 25-30 minutes of narration.
-This batch covers scene numbers {start_number} through {start_number + SCENES_PER_BATCH - 1}.
+Generate EXACTLY {batch_size} scenes in this batch.
+This run must contain {total_scenes} scenes.
+This batch covers scene numbers {start_number} through {start_number + batch_size - 1}.
 
 Continuity context from earlier scenes:
 {context}
@@ -134,15 +142,15 @@ For every other batch return:
                 if attempt > 1:
                     retry_prompt += f"""
 IMPORTANT RETRY {attempt}/3:
-Your previous response did not contain {SCENES_PER_BATCH} usable scenes.
+Your previous response did not contain {batch_size} usable scenes.
 Return ONLY a JSON object with a "scenes" array containing EXACTLY
-{SCENES_PER_BATCH} complete scene objects for this batch. Do not return an
+{batch_size} complete scene objects for this batch. Do not return an
 empty array. Do not summarize. Do not omit any scene.
 """
                 try:
                     result = await _ask_ollama(retry_prompt)
                     act_scenes = result.get("scenes", []) if isinstance(result, dict) else []
-                    if len(act_scenes) >= SCENES_PER_BATCH:
+                    if len(act_scenes) >= batch_size:
                         break
                     logger.warning(
                         "Act %s batch %s attempt %s returned %s scenes; retrying",
@@ -159,9 +167,9 @@ empty array. Do not summarize. Do not omit any scene.
             if len(act_scenes) < SCENES_PER_BATCH:
                 raise ValueError(
                     f"Act {act} batch {batch + 1} must contain at least "
-                    f"{SCENES_PER_BATCH} scenes after 3 attempts; received {len(act_scenes)}"
+                    f"{batch_size} scenes after 3 attempts; received {len(act_scenes)}"
                 )
-            act_scenes = act_scenes[:SCENES_PER_BATCH]
+            act_scenes = act_scenes[:batch_size]
             for offset, scene in enumerate(act_scenes):
                 if isinstance(scene, dict):
                     scene["number"] = start_number + offset
@@ -199,8 +207,9 @@ def repair_story_json(story):
     story.setdefault("acts", [])
     if not isinstance(story.get("scenes"), list) or not story["scenes"]:
         raise ValueError("Story must have a non-empty scenes array")
-    if len(story["scenes"]) != 100:
-        raise ValueError(f"Long-form story needs exactly 100 scenes; received {len(story['scenes'])}")
+    expected_scenes = PREVIEW_SCENES if PREVIEW else 100
+    if len(story["scenes"]) != expected_scenes:
+        raise ValueError(f"Story needs exactly {expected_scenes} scenes for this run; received {len(story['scenes'])}")
 
     story["duration_seconds"] = max(MIN_SECONDS, min(MAX_SECONDS, int(story.get("duration_seconds", 1650))))
     story["target_duration_seconds"] = max(MIN_SECONDS, min(MAX_SECONDS, int(story.get("target_duration_seconds", 1650))))
