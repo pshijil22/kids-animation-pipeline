@@ -28,13 +28,15 @@ def _run_blender(story_file,output_file):
     result=subprocess.run(command,capture_output=True,text=True,timeout=5*60*60)
     if result.returncode:
         logger.error(result.stdout[-5000:]); logger.error(result.stderr[-7000:]); raise RuntimeError("Blender cinematic render failed")
-    frames=sorted(frames_dir.glob("frame_*.jpg"))
+    frames=sorted(frames_dir.rglob("frame_*.jpg"))
     if len(frames)<max(100,FPS*8) or not (frames_dir/"frame_0001.jpg").exists():
-        all_frames=sorted(frames_dir.glob("frame_*.*"))
-        logger.error("Blender produced %s frame files; expected JPEGs. Files: %s",len(all_frames),[p.name for p in all_frames[:20]])
+        all_frames=sorted(frames_dir.rglob("frame_*.*"))
+        logger.error("Blender produced %s frame files; expected JPEGs. Files: %s",len(all_frames),[str(p.relative_to(frames_dir)) for p in all_frames[:40]])
+        logger.error("Blender stdout tail: %s",result.stdout[-4000:])
+        logger.error("Blender stderr tail: %s",result.stderr[-4000:])
         candidates=[]
         for ext in ("jpg","jpeg","png","bmp","tif","tiff"):
-            found=sorted(frames_dir.glob("frame_*.%s"%ext))
+            found=sorted(frames_dir.rglob("frame_*.%s"%ext))
             if len(found)>=max(100,FPS*8) and any(p.name.startswith("frame_0001.") for p in found):
                 candidates=found
                 break
@@ -112,7 +114,7 @@ def _blender_render():
     scene=bpy.context.scene; engines={x.identifier for x in scene.render.bl_rna.properties["engine"].enum_items}
     scene.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
     scene.render.resolution_x,scene.render.resolution_y=width,height; scene.render.resolution_percentage=100; scene.render.fps=fps
-    scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.use_file_extension=True; scene.render.filepath=str(output)
+    scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.use_file_extension=True; scene.render.filepath=str(output); scene.render.use_file_extension=True
     scene.frame_start,scene.frame_end=1,total_frames
     try: scene.view_settings.look="AgX - Medium High Contrast"
     except Exception: pass
