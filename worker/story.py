@@ -15,9 +15,9 @@ import requests
 logger = logging.getLogger(__name__)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
-MIN_SECONDS = 1500
-MAX_SECONDS = 1800
-SCENES_PER_ACT = 20
+MIN_SECONDS = 1140
+MAX_SECONDS = 1260
+SCENES_PER_ACT = 16
 SCENES_PER_BATCH = 5
 
 
@@ -123,8 +123,8 @@ async def generate_story_with_llm():
     scenes = []
     characters = []
 
-    total_scenes = 100
-    total_batches = total_scenes // SCENES_PER_BATCH
+    total_scenes = int(os.getenv("TOTAL_SCENES", "80"))
+    total_batches = (total_scenes + SCENES_PER_BATCH - 1) // SCENES_PER_BATCH
 
     for batch_index in range(total_batches):
         act = (batch_index // (SCENES_PER_ACT // SCENES_PER_BATCH)) + 1
@@ -146,7 +146,7 @@ async def generate_story_with_llm():
 
 You are generating the complete episode in ACT {act} of 5.
 This is batch {batch_index + 1} of {total_batches}.
-The episode MUST remain exactly 100 scenes and 25-30 minutes long.
+The episode MUST remain exactly {total_scenes} scenes and target approximately 20 minutes.
 
 {_scene_schema(start_number, batch_size, include_episode)}
 
@@ -227,8 +227,8 @@ Every scene must include exactly three visual_beats with concrete actions.
                     "lesson", "Kindness and teamwork help us solve problems."
                 ),
                 "age_range": result.get("age_range", "4-8"),
-                "target_duration_seconds": 1650,
-                "duration_seconds": 1650,
+                "target_duration_seconds": total_scenes * 15,
+                "duration_seconds": total_scenes * 15,
                 "characters": result.get("characters", []),
                 "acts": result.get("acts", []),
             }
@@ -254,20 +254,23 @@ def repair_story_json(story):
     story.setdefault("lesson", "Kindness and teamwork help us solve problems.")
     story.setdefault("age_range", "4-8")
     story.setdefault("characters", [])
+    if isinstance(story.get("characters"), dict):
+        story["characters"] = list(story["characters"].values())
+    story["characters"] = [c for c in story.get("characters", []) if isinstance(c, dict) and c.get("name")][:3]
     story.setdefault("acts", [])
     if not isinstance(story.get("scenes"), list) or not story["scenes"]:
         raise ValueError("Story must have a non-empty scenes array")
-    if len(story["scenes"]) != 100:
+    if len(story["scenes"]) != int(os.getenv("TOTAL_SCENES", "80")):
         raise ValueError(
-            f"Story needs exactly 100 scenes for the full movie; "
+            f"Story needs exactly {int(os.getenv("TOTAL_SCENES", "80"))} scenes for the full episode; "
             f"received {len(story['scenes'])}"
         )
 
     story["duration_seconds"] = max(
-        MIN_SECONDS, min(MAX_SECONDS, int(story.get("duration_seconds", 1650)))
+        MIN_SECONDS, min(MAX_SECONDS, int(story.get("duration_seconds", 1200)))
     )
     story["target_duration_seconds"] = max(
-        MIN_SECONDS, min(MAX_SECONDS, int(story.get("target_duration_seconds", 1650)))
+        MIN_SECONDS, min(MAX_SECONDS, int(story.get("target_duration_seconds", 1200)))
     )
 
     normalized = []

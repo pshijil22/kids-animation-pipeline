@@ -58,7 +58,7 @@ jobs:
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: slow
           CINEMATIC_PREVIEW: 'false'
-          CINEMATIC_SCENE_SECONDS: '16.5'
+          CINEMATIC_SCENE_SECONDS: '15.0'
           BLENDER_RENDER_FPS: '12'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
@@ -83,7 +83,7 @@ jobs:
           echo "Duration: $duration"
           echo "Resolution: $width x $height"
           echo "Audio: $audio"
-          python -c "d=float('$duration'); assert 1470 <= d <= 1830, 'Invalid movie duration: %ss' % d"
+          python -c "d=float('$duration'); assert 1140 <= d <= 1260, 'Invalid movie duration: %ss' % d"
           test "$width" = "1920"
           test "$height" = "1080"
           test "$audio" = "aac"
@@ -91,7 +91,7 @@ jobs:
       - name: Upload full movie artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kids-animated-movie
+          name: kids-animated-episode
           path: worker/data/videos/*.mp4
           if-no-files-found: error
           retention-days: 30

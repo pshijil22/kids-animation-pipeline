@@ -16,9 +16,9 @@ PREVIEW=os.getenv("CINEMATIC_PREVIEW","true").lower()=="true"
 FPS=int(os.getenv("BLENDER_RENDER_FPS","12"))
 WIDTH=int(os.getenv("BLENDER_RENDER_WIDTH","640"))
 HEIGHT=int(os.getenv("BLENDER_RENDER_HEIGHT","360"))
-SCENE_SECONDS=float(os.getenv("CINEMATIC_SCENE_SECONDS","15" if PREVIEW else "16.5"))
-MIN_SECONDS=80 if PREVIEW else 1470
-MAX_SECONDS=110 if PREVIEW else 1830
+SCENE_SECONDS=float(os.getenv("CINEMATIC_SCENE_SECONDS","15"))
+MIN_SECONDS=80 if PREVIEW else 1140
+MAX_SECONDS=110 if PREVIEW else 1260
 
 def _run_blender(story_file,output_file):
     blender,ffmpeg=shutil.which("blender"),shutil.which("ffmpeg")
@@ -59,7 +59,7 @@ def _concat_audio_video(video,narration,subtitles,output):
 
 async def generate_scenes(story,job_id):
     SHOTS_DIR.mkdir(parents=True,exist_ok=True); VIDEOS_DIR.mkdir(parents=True,exist_ok=True)
-    scenes=story.get("scenes",[]); expected=6 if PREVIEW else 100
+    scenes=story.get("scenes",[]); expected=6 if PREVIEW else int(os.getenv("TOTAL_SCENES","80"))
     if len(scenes)!=expected: raise ValueError("Expected %s scenes, received %s"%(expected,len(scenes)))
     story_file=SHOTS_DIR/("%s_story.json"%job_id); silent=VIDEOS_DIR/("%s_cinematic.mp4"%job_id)
     story_file.write_text(json.dumps(story,ensure_ascii=False),encoding="utf-8")
