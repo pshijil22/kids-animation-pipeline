@@ -130,7 +130,6 @@ def _blender_render():
     for x,y,s in [(-5,1,1),(4,3,.8),(8,-2,1.1),(-8,-3,.65)]: sphere("Rock",(x,y,.02),(s,s*.7,s*.4),rock)
     for y in (-7,-8.2,-9.4): curve("Wave",[(-14,y,0),(-7,y+.35,.08),(0,y,.02),(7,y-.3,.08),(14,y,0)],.045,white)
 
-
     def prop_for(text, material_map):
         t=(text or "").lower()
         choices=[
@@ -171,8 +170,14 @@ def _blender_render():
     cd=bpy.data.cameras.new("Camera"); camera=bpy.data.objects.new("Camera",cd); bpy.context.collection.objects.link(camera); scene.camera=camera
     cd.dof.use_dof=True; cd.dof.aperture_fstop=2.2; focus=bpy.data.objects.new("Focus",None); bpy.context.collection.objects.link(focus); cd.dof.focus_object=focus
 
-    palettes=[(.88,.32,.16),(.18,.48,.78),(.62,.24,.66)]; heroes=[]
-    for idx,_unused in enumerate(story.get("characters",[])[:3]):
+    palettes=[(.88,.32,.16),(.18,.48,.78),(.62,.24,.66)]
+    heroes=[]
+    characters=story.get("characters",[])
+    if isinstance(characters,dict):
+        characters=list(characters.values())
+    elif not isinstance(characters,list):
+        characters=[]
+    for idx,_unused in enumerate(characters[:3]):
         bm=mat("Hero%d"%idx,palettes[idx%3],.48); root=bpy.data.objects.new("HeroRoot%d"%idx,None); bpy.context.collection.objects.link(root)
         body=sphere("Body%d"%idx,(0,0,1.15),(.78,.58,.92),bm); head=sphere("Head%d"%idx,(0,-.02,2.15),(.72,.65,.68),bm); body.parent=root; head.parent=root
         arms=[]; legs=[]; pupils=[]; brows=[]
@@ -182,7 +187,7 @@ def _blender_render():
             b=curve("Brow",[(side*.39,-.64,2.49),(side*.15,-.68,2.54)],.025,pupil); b.parent=root
             a=sphere("Arm",(side*.78,-.02,1.35),(.18,.18,.62),bm); a.parent=root; arms.append(a)
             l=sphere("Leg",(side*.34,.02,.47),(.20,.20,.58),bm); l.parent=root; legs.append(l)
-            ear=sphere("Ear",(side*.42,.02,2.70),(.24,.18,.48),bm); ear.parent=root
+            ear=sphere("Ear",(side*.42,.02,2.70),(.24,.18,.48),bm); ear.parent=root; ears=[]
             pupils.append(p); brows.append(b)
         m=curve("Mouth",[(-.18,-.66,1.95),(0,-.70,1.90),(.18,-.66,1.95)],.035,mouth); m.parent=root
         tail=curve("Tail",[(0,.45,1.35),(.45,.72,1.48),(.82,.70,1.85)],.13,bm); tail.parent=root
@@ -225,38 +230,23 @@ def _blender_render():
         for bidx,beat in enumerate(beats[:3]):
             bs=start+bidx*third
             be=end if bidx==2 else start+(bidx+1)*third-1
-            beat_text=" ".join(
-                str(beat.get(k,""))
-                for k in ("narration_line","subject","action","prop")
-            )
+            beat_text=" ".join(str(beat.get(k,"")) for k in ("narration_line","subject","action","prop"))
             beat_action=str(beat.get("action") or sc.get("action") or "")
             beat_subject=str(beat.get("subject") or sc.get("character_actions") or "")
             beat_emotion=str(sc.get("emotion") or "curious")
-            # Animate the actual action described by this beat, rather than
-            # applying one generic scene animation to all three shots.
             for idx,h in enumerate(heroes):
-                animate(h, beat_action + " " + beat_subject, beat_emotion, bs, be, idx)
-            # Give each beat its own concrete story prop. This prevents a key,
-            # box, map, etc. from becoming one unrelated object for the whole
-            # scene and lets each narration line have a corresponding visual.
+                animate(h, beat_action+" "+beat_subject, beat_emotion, bs, be, idx)
             beat_kind=prop_for(beat_text, prop_mats)
             beat_prop=make_prop(beat_kind, prop_mats)
             target=(-.2+(i%3)*.4,-.35,1.8)
             if beat_prop:
-                beat_prop.location=(.15,-.55,.55)
-                beat_prop.keyframe_insert("location",frame=bs)
-                beat_prop.location=(.25,-.25,.85)
-                beat_prop.keyframe_insert("location",frame=be)
-                beat_prop.scale=(1,1,1)
-                beat_prop.keyframe_insert("scale",frame=bs)
-                beat_prop.scale=(1.08,1.08,1.08)
-                beat_prop.keyframe_insert("scale",frame=be)
+                beat_prop.location=(.15,-.55,.55); beat_prop.keyframe_insert("location",frame=bs)
+                beat_prop.location=(.25,-.25,.85); beat_prop.keyframe_insert("location",frame=be)
+                beat_prop.scale=(1,1,1); beat_prop.keyframe_insert("scale",frame=bs)
+                beat_prop.scale=(1.08,1.08,1.08); beat_prop.keyframe_insert("scale",frame=be)
                 if any(w in beat_action.lower() for w in ("open","reveal","turn","lift")):
-                    key(beat_prop,bs,rot=(0,0,math.radians(-8)))
-                    key(beat_prop,be,rot=(0,math.radians(35),math.radians(8)))
+                    key(beat_prop,bs,rot=(0,0,math.radians(-8))); key(beat_prop,be,rot=(0,math.radians(35),math.radians(8)))
                 target=(.25,-.4,.9)
-            # Point the shot at the subject when the beat is character-led;
-            # point it at the prop when the narration names a concrete object.
             if not beat_kind:
                 target=(-.2+(i%3)*.4,-.35,1.8)
             shot(str(beat.get("camera") or sc.get("camera") or ""),bs,be,target,shot_no)
