@@ -1,0 +1,13 @@
+{
+  "version":"1",
+  "series_title":"Little Wonder Trails",
+  "episode_number":1,
+  "target_episode_minutes":20,
+  "age_range":"4-8",
+  "recurring_cast":[
+    {"name":"Pip","species":"bunny","personality":"curious, kind, inventive","appearance":"small cream bunny with a teal scarf","color":"teal","voice":"bright"},
+    {"name":"Momo","species":"bear","personality":"gentle, funny, dependable","appearance":"round honey-brown bear with a yellow satchel","color":"brown","voice":"gentle"},
+    {"name":"Tilly","species":"fox","personality":"brave, playful, observant","appearance":"small orange fox with a purple backpack","color":"orange","voice":"bold"}
+  ],
+  "world_rules":["Warm colorful world where ordinary places reveal small wonders.","Problems are solved with curiosity, cooperation, empathy and persistence.","Each episode stands alone while the same friends and world return.","Use original stories, objects and designs only."]
+}

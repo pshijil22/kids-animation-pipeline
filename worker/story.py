@@ -33,6 +33,16 @@ async def wait_for_ollama(max_retries=180, delay=1):
     raise RuntimeError(f"Ollama not responding at {OLLAMA_URL}")
 
 
+def _series_bible():
+    for path in (Path("../series/series.json"), Path("series/series.json")):
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                logger.warning("Could not load series bible: %s", exc)
+    return {}
+
+
 def _prompt_file():
     paths = [
         Path("/app/prompts/story.txt"),
@@ -119,6 +129,7 @@ noun or action in narration should have a matching visual beat.
 async def generate_story_with_llm():
     await wait_for_ollama()
     base = _prompt_file().read_text(encoding="utf-8")
+    series = _series_bible()
     story = None
     scenes = []
     characters = []
@@ -143,6 +154,9 @@ async def generate_story_with_llm():
         include_episode = batch_index == 0
         prompt = f"""
 {base}
+
+SERIES BIBLE (maintain continuity across future episodes):
+{json.dumps(series, ensure_ascii=False)}
 
 You are generating the complete episode in ACT {act} of 5.
 This is batch {batch_index + 1} of {total_batches}.
@@ -229,8 +243,10 @@ Every scene must include exactly three visual_beats with concrete actions.
                 "age_range": result.get("age_range", "4-8"),
                 "target_duration_seconds": total_scenes * 15,
                 "duration_seconds": total_scenes * 15,
-                "characters": result.get("characters", []),
+                "characters": result.get("characters", []) or series.get("recurring_cast", []),
                 "acts": result.get("acts", []),
+                "series_title": series.get("series_title", "Original Kids Adventures"),
+                "episode_number": int(series.get("episode_number", 1)),
             }
             characters = story["characters"]
 
