@@ -278,7 +278,7 @@ def repair_story_json(story):
         raise ValueError("Story must have a non-empty scenes array")
     if len(story["scenes"]) != int(os.getenv("TOTAL_SCENES", "80")):
         raise ValueError(
-            f"Story needs exactly {int(os.getenv("TOTAL_SCENES", "80"))} scenes for the full episode; "
+            f"Story needs exactly {int(os.getenv('TOTAL_SCENES', '80'))} scenes for the full episode; "
             f"received {len(story['scenes'])}"
         )
 
