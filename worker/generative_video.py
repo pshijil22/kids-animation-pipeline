@@ -43,7 +43,7 @@ def _run_blender(story_file,output_file):
         shard_frames.mkdir(parents=True,exist_ok=True)
         shard_story_file.write_text(json.dumps(shard_story,ensure_ascii=False),encoding="utf-8")
         command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(shard_story_file.resolve()),"--output",str((shard_frames/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
-        result=subprocess.run(command,capture_output=True,text=True,timeout=90*60)
+        result=subprocess.run(command,capture_output=True,text=True,timeout=120*60)
         if result.returncode:
             logger.error("Blender shard %s stdout: %s",index,result.stdout[-5000:])
             logger.error("Blender shard %s stderr: %s",index,result.stderr[-7000:])
