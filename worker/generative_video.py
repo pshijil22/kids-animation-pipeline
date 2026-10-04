@@ -40,6 +40,7 @@ def _run_blender(story_file,output_file):
         shard_story_file=work_dir/("story_%02d.json"%index)
         shard_output=work_dir/("part_%02d.mp4"%index)
         shard_frames=work_dir/("frames_%02d"%index)
+        shard_frames.mkdir(parents=True,exist_ok=True)
         shard_story_file.write_text(json.dumps(shard_story,ensure_ascii=False),encoding="utf-8")
         command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(shard_story_file.resolve()),"--output",str((shard_frames/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
         result=subprocess.run(command,capture_output=True,text=True,timeout=90*60)
