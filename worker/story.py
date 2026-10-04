@@ -65,7 +65,7 @@ def _extract_json(raw):
         return json.loads(match.group(0))
 
 
-async def _ask_ollama(prompt, timeout=600):
+async def _ask_ollama(prompt, timeout=180):
     response = requests.post(
         f"{OLLAMA_URL}/api/generate",
         json={
@@ -74,8 +74,8 @@ async def _ask_ollama(prompt, timeout=600):
             "stream": False,
             "format": "json",
             "options": {
-                "num_ctx": 8192,
-                "num_predict": 6000,
+                "num_ctx": 4096,
+                "num_predict": 2400,
                 "temperature": 0.7,
             },
         },
@@ -126,137 +126,130 @@ noun or action in narration should have a matching visual beat.
 """
 
 
+def _fallback_plan(series):
+    cast = series.get("recurring_cast", [])
+    return {
+        "title": "The Hidden Garden Bell",
+        "description": "Pip, Momo and Tilly follow a mysterious bell sound through their village and learn that careful listening and teamwork can reveal a wonderful surprise.",
+        "lesson": "Small clues become big discoveries when friends listen, share ideas and help one another.",
+        "age_range": "4-8",
+        "characters": cast,
+        "acts": [
+            {"number": 1, "goal": "find the source of a mysterious bell", "obstacle": "the sound keeps moving", "discovery": "three tiny clues point toward the old garden"},
+            {"number": 2, "goal": "cross the meadow and follow the clues", "obstacle": "wind scatters the trail", "discovery": "a ribbon and seed trail reveal a hidden path"},
+            {"number": 3, "goal": "open the overgrown garden gate", "obstacle": "the gate is stuck and the path is tangled", "discovery": "each friend has a useful idea"},
+            {"number": 4, "goal": "restore the quiet garden bell", "obstacle": "the bell rope is tangled high in a tree", "discovery": "cooperation makes the difficult job simple"},
+            {"number": 5, "goal": "share the discovery with the village", "obstacle": "everyone rushes before noticing the final clue", "discovery": "the garden is a place for everyone to enjoy together"}
+        ],
+        "locations": ["Sunny Village", "Dandelion Meadow", "Creek Footbridge", "Old Garden Gate", "Hidden Garden"],
+        "props": ["tiny brass bell", "teal ribbon", "yellow satchel", "purple backpack", "wooden sign", "garden key", "watering can", "flower basket"]
+    }
+
+
+async def _compact_story_plan(series):
+    prompt = f"""
+Create a compact ORIGINAL children's animation episode plan for ages 4-8.
+Series bible: {json.dumps(series, ensure_ascii=False)}
+Return ONLY JSON with:
+title, description, lesson, age_range, characters, acts, locations, props.
+Use the recurring characters and preserve their appearance/personality.
+acts must be exactly 5 objects, each with number, goal, obstacle, discovery.
+Keep the whole answer under about 1800 tokens. Do not write scenes or narration.
+The episode should have a clear beginning, escalating middle, emotional payoff and warm ending.
+"""
+    try:
+        result = await _ask_ollama(prompt, timeout=180)
+        if not isinstance(result, dict):
+            raise ValueError("compact plan was not an object")
+        acts = result.get("acts")
+        if not isinstance(acts, list) or len(acts) < 5:
+            raise ValueError("compact plan did not contain five acts")
+        result["acts"] = acts[:5]
+        return result
+    except Exception as exc:
+        logger.warning("Compact story plan unavailable; using deterministic fallback: %s", exc)
+        return _fallback_plan(series)
+
+
+def _make_scene(number, act, plan, series):
+    cast = plan.get("characters") or series.get("recurring_cast") or _fallback_plan(series)["characters"]
+    names = [c.get("name", "friend") for c in cast if isinstance(c, dict)]
+    names = (names + ["Pip", "Momo", "Tilly"])[:3]
+    hero = names[(number - 1) % len(names)]
+    partner = names[number % len(names)]
+    locations = plan.get("locations") or _fallback_plan(series)["locations"]
+    props = plan.get("props") or _fallback_plan(series)["props"]
+    location = locations[(number - 1) % len(locations)]
+    prop = props[(number * 3) % len(props)]
+    action_cycle = [
+        ("spots", "leans closer and points"),
+        ("follows", "steps carefully after the clue"),
+        ("checks", "kneels to inspect the trail"),
+        ("carries", "carefully carries the useful object"),
+        ("opens", "gently tests the hidden mechanism"),
+        ("climbs", "reaches toward the next clue"),
+        ("listens", "pauses and listens for the sound"),
+        ("shares", "shows the clue to the friends"),
+    ]
+    verb, motion = action_cycle[(number - 1) % len(action_cycle)]
+    act_info = act[(number - 1) % len(act)] if act else {}
+    goal = act_info.get("goal", "discover what happens next")
+    obstacle = act_info.get("obstacle", "the trail becomes harder to follow")
+    discovery = act_info.get("discovery", "the friends find a useful clue")
+    moment = (number - 1) % 16
+    time_of_day = ["morning", "morning", "late morning", "noon", "afternoon", "afternoon", "golden hour", "evening"][moment % 8]
+    title = f"Act {((number - 1) // 16) + 1}: {verb.title()} the Clue"
+    s1 = f"{hero} {verb} a clue near the {location}, keeping the friends focused on their goal."
+    s2 = f"{partner} {motion} while the {prop} gives them a fresh hint about what to do next."
+    s3 = f"Together they face {obstacle}, then notice that {discovery} and move one step closer to {goal}."
+    narration = " ".join([s1, s2, s3])
+    beats = [
+        {"narration_line": s1, "subject": hero, "action": f"{verb} a clue", "prop": prop, "camera": "wide establishing push-in"},
+        {"narration_line": s2, "subject": partner, "action": motion, "prop": prop, "camera": "medium tracking shot"},
+        {"narration_line": s3, "subject": f"{hero} and {partner}", "action": "react, cooperate and continue", "prop": prop, "camera": "warm close reaction shot"},
+    ]
+    return {
+        "number": number,
+        "act": ((number - 1) // 16) + 1,
+        "title": title,
+        "narration": narration,
+        "visual_description": f"High-end family 3D animated-feature scene in {location}; {hero} and {partner} interact with a {prop} while following a physical clue.",
+        "visual_beats": beats,
+        "location": location,
+        "time_of_day": time_of_day,
+        "action": f"{hero} {verb} a clue and {partner} helps.",
+        "character_actions": f"{hero} and {partner} cooperate, react and continue the search.",
+        "props": prop,
+        "emotion": ["curious", "excited", "hopeful", "surprised", "determined"][number % 5],
+        "camera": beats[1]["camera"],
+        "motion": "gentle character movement with a controlled cinematic camera move",
+        "continuity": "Carry the same clue, character appearances and emotional state naturally from the previous scene.",
+        "duration_seconds": 15.0,
+    }
+
+
 async def generate_story_with_llm():
-    await wait_for_ollama()
-    base = _prompt_file().read_text(encoding="utf-8")
+    await wait_for_ollama(max_retries=30, delay=1)
     series = _series_bible()
-    story = None
-    scenes = []
-    characters = []
-
+    plan = await _compact_story_plan(series)
     total_scenes = int(os.getenv("TOTAL_SCENES", "80"))
-    total_batches = (total_scenes + SCENES_PER_BATCH - 1) // SCENES_PER_BATCH
-
-    for batch_index in range(total_batches):
-        act = (batch_index // (SCENES_PER_ACT // SCENES_PER_BATCH)) + 1
-        start_number = len(scenes) + 1
-        batch_size = min(SCENES_PER_BATCH, total_scenes - len(scenes))
-        recent = scenes[-4:] if scenes else []
-        context = json.dumps(
-            {
-                "characters": characters,
-                "recent_scenes": recent,
-                "next_act": act,
-                "completed_scene_count": len(scenes),
-            },
-            ensure_ascii=False,
-        )
-        include_episode = batch_index == 0
-        prompt = f"""
-{base}
-
-SERIES BIBLE (maintain continuity across future episodes):
-{json.dumps(series, ensure_ascii=False)}
-
-You are generating the complete episode in ACT {act} of 5.
-This is batch {batch_index + 1} of {total_batches}.
-The episode MUST remain exactly {total_scenes} scenes and target approximately 20 minutes.
-
-{_scene_schema(start_number, batch_size, include_episode)}
-
-Continuity context from the preceding scenes:
-{context}
-
-Story requirements for this batch:
-- Continue the same central problem and character goals.
-- Escalate the adventure gently; do not reset the story.
-- Preserve character names, species, appearance and personality.
-- Preserve important props and locations when continuity requires them.
-- Introduce new visible events rather than filler travel scenes.
-- Act 1 establishes the hook and goal; Acts 2-4 develop discoveries,
-  obstacles and teamwork; Act 5 resolves the goal and lands the lesson.
-- Make every scene visually distinct and physically animatable in Blender.
-- Keep all events warm, funny, adventurous and age-appropriate.
-"""
-        logger.info(
-            "Generating story batch %s/%s (act %s, scenes %s-%s)",
-            batch_index + 1,
-            total_batches,
-            act,
-            start_number,
-            start_number + batch_size - 1,
-        )
-
-        result = None
-        act_scenes = []
-        for attempt in range(1, 4):
-            retry_prompt = prompt
-            if attempt > 1:
-                retry_prompt += f"""
-RETRY {attempt}/3: The previous response was incomplete.
-Return ONLY one JSON object with exactly {batch_size} complete scenes.
-Do not summarize, omit, merge, or invent a different scene count.
-Every scene must include exactly three visual_beats with concrete actions.
-"""
-            try:
-                result = await _ask_ollama(retry_prompt)
-                act_scenes = result.get("scenes", []) if isinstance(result, dict) else []
-                if len(act_scenes) >= batch_size:
-                    break
-                logger.warning(
-                    "Batch %s attempt %s returned %s scenes; retrying",
-                    batch_index + 1,
-                    attempt,
-                    len(act_scenes),
-                )
-            except (ValueError, requests.RequestException) as exc:
-                logger.warning(
-                    "Batch %s attempt %s failed: %s; retrying",
-                    batch_index + 1,
-                    attempt,
-                    exc,
-                )
-                if attempt == 3:
-                    raise
-
-        if len(act_scenes) < batch_size:
-            raise ValueError(
-                f"Batch {batch_index + 1} needs {batch_size} scenes; "
-                f"received {len(act_scenes)}"
-            )
-
-        act_scenes = act_scenes[:batch_size]
-        for offset, scene in enumerate(act_scenes):
-            if isinstance(scene, dict):
-                scene["number"] = start_number + offset
-                scene["act"] = act
-
-        if include_episode:
-            story = {
-                "title": result.get("title", "A New Adventure"),
-                "description": result.get(
-                    "description", "An original adventure for children."
-                ),
-                "lesson": result.get(
-                    "lesson", "Kindness and teamwork help us solve problems."
-                ),
-                "age_range": result.get("age_range", "4-8"),
-                "target_duration_seconds": total_scenes * 15,
-                "duration_seconds": total_scenes * 15,
-                "characters": result.get("characters", []) or series.get("recurring_cast", []),
-                "acts": result.get("acts", []),
-                "series_title": series.get("series_title", "Original Kids Adventures"),
-                "episode_number": int(series.get("episode_number", 1)),
-            }
-            characters = story["characters"]
-
-        scenes.extend(act_scenes)
-
-    if story is None or len(scenes) != total_scenes:
-        raise ValueError(f"Expected {total_scenes} generated scenes, received {len(scenes)}")
-    story["scenes"] = scenes
+    acts = plan.get("acts", [])
+    scenes = [_make_scene(i, acts, plan, series) for i in range(1, total_scenes + 1)]
+    cast = plan.get("characters") or series.get("recurring_cast") or _fallback_plan(series)["characters"]
+    story = {
+        "title": plan.get("title", "A New Adventure"),
+        "description": plan.get("description", "An original adventure for children."),
+        "lesson": plan.get("lesson", "Kindness and teamwork help us solve problems."),
+        "age_range": plan.get("age_range", "4-8"),
+        "target_duration_seconds": total_scenes * 15,
+        "duration_seconds": total_scenes * 15,
+        "characters": cast,
+        "acts": acts[:5],
+        "series_title": series.get("series_title", "Original Kids Adventures"),
+        "episode_number": int(series.get("episode_number", 1)),
+        "scenes": scenes,
+    }
     return json.dumps(story, ensure_ascii=False)
-
 
 def validate_story_json(raw_text):
     return repair_story_json(_extract_json(raw_text))
