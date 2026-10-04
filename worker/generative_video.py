@@ -21,34 +21,58 @@ MIN_SECONDS=80 if PREVIEW else 1140
 MAX_SECONDS=110 if PREVIEW else 1260
 
 def _run_blender(story_file,output_file):
+    """Render the episode in parallel Blender shards, then stitch losslessly."""
     blender,ffmpeg=shutil.which("blender"),shutil.which("ffmpeg")
     if not blender or not ffmpeg: raise RuntimeError("Blender and FFmpeg must be installed.")
-    frames_dir=output_file.with_name(output_file.stem+"_frames"); frames_dir.mkdir(parents=True,exist_ok=True)
-    command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(story_file.resolve()),"--output",str((frames_dir/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
-    result=subprocess.run(command,capture_output=True,text=True,timeout=5*60*60)
-    if result.returncode:
-        logger.error(result.stdout[-5000:]); logger.error(result.stderr[-7000:]); raise RuntimeError("Blender cinematic render failed")
-    frames=sorted(frames_dir.rglob("frame_*.jpg"))
-    if len(frames)<max(100,FPS*8) or not (frames_dir/"frame_0001.jpg").exists():
-        all_frames=sorted(frames_dir.rglob("frame_*.*"))
-        logger.error("Blender produced %s frame files; expected JPEGs. Files: %s",len(all_frames),[str(p.relative_to(frames_dir)) for p in all_frames[:40]])
-        logger.error("Blender stdout tail: %s",result.stdout[-4000:])
-        logger.error("Blender stderr tail: %s",result.stderr[-4000:])
-        candidates=[]
-        for ext in ("jpg","jpeg","png","bmp","tif","tiff"):
-            found=sorted(frames_dir.rglob("frame_*.%s"%ext))
-            if len(found)>=max(100,FPS*8) and any(p.name.startswith("frame_0001.") for p in found):
-                candidates=found
-                break
-        if not candidates:
-            raise RuntimeError("Blender did not produce enough frames")
-        frames=candidates
-    frame_pattern=frames_dir/("frame_%04d.%s"%(1,frames[0].suffix.lstrip(".")))
-    command=[ffmpeg,"-y","-loglevel","warning","-framerate",str(FPS),"-start_number","1","-i",str(frame_pattern),"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","slow"),"-b:v",os.getenv("VIDEO_BITRATE","1400k"),"-maxrate",os.getenv("VIDEO_MAXRATE","1600k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","3200k"),"-pix_fmt","yuv420p","-movflags","+faststart",str(output_file)]
-    encoded=subprocess.run(command,capture_output=True,text=True,timeout=7200)
-    if encoded.returncode or not output_file.exists():
-        logger.error(encoded.stderr[-6000:]); raise RuntimeError("FFmpeg could not encode the render")
-    shutil.rmtree(frames_dir,ignore_errors=True)
+    story=json.loads(Path(story_file).read_text(encoding="utf-8"))
+    scenes=story.get("scenes",[])
+    requested=int(os.getenv("BLENDER_SHARDS","4"))
+    shard_count=max(1,min(requested,len(scenes) or 1))
+    shard_size=math.ceil(len(scenes)/shard_count)
+    work_dir=output_file.with_name(output_file.stem+"_shards")
+    work_dir.mkdir(parents=True,exist_ok=True)
+
+    def render_one(index):
+        first=index*shard_size
+        shard_scenes=scenes[first:first+shard_size]
+        shard_story=dict(story)
+        shard_story["scenes"]=shard_scenes
+        shard_story_file=work_dir/("story_%02d.json"%index)
+        shard_output=work_dir/("part_%02d.mp4"%index)
+        shard_frames=work_dir/("frames_%02d"%index)
+        shard_story_file.write_text(json.dumps(shard_story,ensure_ascii=False),encoding="utf-8")
+        command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(shard_story_file.resolve()),"--output",str((shard_frames/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
+        result=subprocess.run(command,capture_output=True,text=True,timeout=90*60)
+        if result.returncode:
+            logger.error("Blender shard %s stdout: %s",index,result.stdout[-5000:])
+            logger.error("Blender shard %s stderr: %s",index,result.stderr[-7000:])
+            raise RuntimeError("Blender shard %s failed"%index)
+        frames=sorted(shard_frames.rglob("frame_*.jpg"))
+        if len(frames)<max(100,FPS*8) or not (shard_frames/"frame_0001.jpg").exists():
+            logger.error("Blender shard %s produced %s frames",index,len(frames))
+            raise RuntimeError("Blender shard %s did not produce enough frames"%index)
+        frame_pattern=shard_frames/"frame_%04d.jpg"
+        encode=[ffmpeg,"-y","-loglevel","warning","-framerate",str(FPS),"-start_number","1","-i",str(frame_pattern),"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","slow"),"-b:v",os.getenv("VIDEO_BITRATE","1400k"),"-maxrate",os.getenv("VIDEO_MAXRATE","1600k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","3200k"),"-pix_fmt","yuv420p","-movflags","+faststart",str(shard_output)]
+        encoded=subprocess.run(encode,capture_output=True,text=True,timeout=60*60)
+        if encoded.returncode or not shard_output.exists():
+            logger.error("FFmpeg shard %s stderr: %s",index,encoded.stderr[-6000:])
+            raise RuntimeError("FFmpeg shard %s failed"%index)
+        shutil.rmtree(shard_frames,ignore_errors=True)
+        return shard_output
+
+    from concurrent.futures import ThreadPoolExecutor
+    logger.info("Rendering %s scenes in %s parallel Blender shards (%sx%s/%sfps)",len(scenes),shard_count,WIDTH,HEIGHT,FPS)
+    with ThreadPoolExecutor(max_workers=shard_count) as pool:
+        parts=list(pool.map(render_one,range(shard_count)))
+
+    concat_file=work_dir/"concat.txt"
+    concat_file.write_text("".join("file '%s'\n"%p.resolve().as_posix().replace("'","'\\''") for p in parts),encoding="utf-8")
+    command=[ffmpeg,"-y","-loglevel","warning","-f","concat","-safe","0","-i",str(concat_file),"-c","copy","-movflags","+faststart",str(output_file)]
+    result=subprocess.run(command,capture_output=True,text=True,timeout=30*60)
+    if result.returncode or not output_file.exists():
+        logger.error("FFmpeg concat stderr: %s",result.stderr[-6000:])
+        raise RuntimeError("FFmpeg could not stitch the cinematic shards")
+    shutil.rmtree(work_dir,ignore_errors=True)
 
 def _concat_audio_video(video,narration,subtitles,output):
     sub=str(subtitles.resolve()).replace(chr(92),"/").replace(":","\:")
