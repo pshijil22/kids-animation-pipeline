@@ -192,7 +192,7 @@ def _make_scene(number, act, plan, series):
         ("shares", "shows the clue to the friends"),
     ]
     verb, motion = action_cycle[(number - 1) % len(action_cycle)]
-    act_info = act[(number - 1) % len(act)] if act else {}
+    act_index = min((number - 1) // SCENES_PER_ACT, len(act) - 1) if act else 0\n    act_info = act[act_index] if act else {}
     goal = act_info.get("goal", "discover what happens next")
     obstacle = act_info.get("obstacle", "the trail becomes harder to follow")
     discovery = act_info.get("discovery", "the friends find a useful clue")
