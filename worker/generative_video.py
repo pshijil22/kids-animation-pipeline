@@ -55,7 +55,7 @@ def _run_blender(story_file,output_file):
             str(Path(__file__).resolve()), "--",
             "--free-blender-render", "--single-frame-scenes",
             "--story", str(shard_story_file.resolve()),
-            "--output", str((shard_frames / "scene_####.jpg").resolve()),
+            "--output", str((shard_frames / "scene_####").resolve()),
             "--fps", str(FPS), "--width", str(WIDTH), "--height", str(HEIGHT),
         ]
         result = subprocess.run(
@@ -384,7 +384,7 @@ def _blender_render():
                     bpy.data.objects.remove(obj, do_unlink=True)
             compose_scene(sc, scene_index)
             frame_path = output.parent / ("scene_%04d.jpg" % scene_index)
-            scene.render.filepath = str(frame_path)
+            scene.render.filepath = str(frame_path.with_suffix(""))
             bpy.ops.render.render(write_still=True)
             if not frame_path.exists():
                 candidates = sorted(output.parent.glob("scene_%04d*" % scene_index))
