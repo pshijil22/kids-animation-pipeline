@@ -8,7 +8,8 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 TARGET = float(os.getenv("CINEMATIC_SCENE_SECONDS", "15.0"))
-PIPER_MODEL = os.getenv("PIPER_MODEL", "en_US-lessac-high")\nVOICE_DIR = DATA_DIR / "voices"
+PIPER_MODEL = os.getenv("PIPER_MODEL", "en_US-lessac-high")
+VOICE_DIR = DATA_DIR / "voices"
 VOICE = os.getenv("TTS_VOICE", "en-us")
 
 
@@ -150,7 +151,8 @@ async def generate_narration_from_story(story, job_id):
     concat = AUDIO_DIR / f"{job_id}_concat.txt"
     with concat.open("w", encoding="utf-8") as f:
         for p in files:
-            f.write(f"file '{Path(p).resolve()}'\n")
+            f.write(f"file '{Path(p).resolve()}'
+")
     narration = AUDIO_DIR / f"{job_id}_narration.wav"
     r = subprocess.run(
         [
@@ -179,7 +181,12 @@ async def generate_narration_from_story(story, job_id):
     srt = AUDIO_DIR / f"{job_id}_subtitles.srt"
     with srt.open("w", encoding="utf-8") as f:
         for idx, start, spoken, title, text in entries:
-            f.write(f"{idx}\n{_srt(start)} --> {_srt(start + spoken)}\n{title}\n{text}\n\n")
+            f.write(f"{idx}
+{_srt(start)} --> {_srt(start + spoken)}
+{title}
+{text}
+
+")
     return {
         "narration_file": str(narration),
         "subtitles_file": str(srt),
