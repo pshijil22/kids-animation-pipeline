@@ -13,7 +13,7 @@ DATA_DIR=Path(os.getenv("DATA_DIR","./data"))
 VIDEOS_DIR=DATA_DIR/"videos"
 SHOTS_DIR=DATA_DIR/"generated_shots"
 PREVIEW=os.getenv("CINEMATIC_PREVIEW","true").lower()=="true"
-FPS=int(os.getenv("BLENDER_RENDER_FPS","12"))
+FPS=int(os.getenv("BLENDER_RENDER_FPS","2"))
 WIDTH=int(os.getenv("BLENDER_RENDER_WIDTH","640"))
 HEIGHT=int(os.getenv("BLENDER_RENDER_HEIGHT","360"))
 SCENE_SECONDS=float(os.getenv("CINEMATIC_SCENE_SECONDS","15"))
@@ -43,13 +43,13 @@ def _run_blender(story_file,output_file):
         shard_frames.mkdir(parents=True,exist_ok=True)
         shard_story_file.write_text(json.dumps(shard_story,ensure_ascii=False),encoding="utf-8")
         command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(shard_story_file.resolve()),"--output",str((shard_frames/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
-        result=subprocess.run(command,capture_output=True,text=True,timeout=120*60)
+        result=subprocess.run(command,capture_output=True,text=True,timeout=60*60)
         if result.returncode:
             logger.error("Blender shard %s stdout: %s",index,result.stdout[-5000:])
             logger.error("Blender shard %s stderr: %s",index,result.stderr[-7000:])
             raise RuntimeError("Blender shard %s failed"%index)
         frames=sorted(shard_frames.rglob("frame_*.jpg"))
-        if len(frames)<max(100,FPS*8) or not (shard_frames/"frame_0001.jpg").exists():
+        if len(frames)<max(30,FPS*8) or not (shard_frames/"frame_0001.jpg").exists():
             logger.error("Blender shard %s produced %s frames",index,len(frames))
             raise RuntimeError("Blender shard %s did not produce enough frames"%index)
         frame_pattern=shard_frames/"frame_%04d.jpg"
