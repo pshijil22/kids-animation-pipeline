@@ -171,14 +171,39 @@ The episode should have a clear beginning, escalating middle, emotional payoff a
         return _fallback_plan(series)
 
 
+def _as_list(value, fallback):
+    """Normalize LLM fields that may arrive as lists, dicts, or scalars."""
+    if isinstance(value, list):
+        return value or fallback
+    if isinstance(value, dict):
+        return list(value.values()) or fallback
+    if value is None:
+        return fallback
+    return [value]
+
+
+def _normalize_plan(plan, series):
+    fallback = _fallback_plan(series)
+    if not isinstance(plan, dict):
+        return fallback
+    plan["characters"] = _as_list(plan.get("characters"), fallback["characters"])
+    plan["locations"] = _as_list(plan.get("locations"), fallback["locations"])
+    plan["props"] = _as_list(plan.get("props"), fallback["props"])
+    acts = _as_list(plan.get("acts"), fallback["acts"])
+    plan["acts"] = [a for a in acts if isinstance(a, dict)][:5]
+    if len(plan["acts"]) < 5:
+        plan["acts"] = fallback["acts"]
+    return plan
+
+
 def _make_scene(number, act, plan, series):
     cast = plan.get("characters") or series.get("recurring_cast") or _fallback_plan(series)["characters"]
     names = [c.get("name", "friend") for c in cast if isinstance(c, dict)]
     names = (names + ["Pip", "Momo", "Tilly"])[:3]
     hero = names[(number - 1) % len(names)]
     partner = names[number % len(names)]
-    locations = plan.get("locations") or _fallback_plan(series)["locations"]
-    props = plan.get("props") or _fallback_plan(series)["props"]
+    locations = _as_list(plan.get("locations"), _fallback_plan(series)["locations"])
+    props = _as_list(plan.get("props"), _fallback_plan(series)["props"])
     location = locations[(number - 1) % len(locations)]
     prop = props[(number * 3) % len(props)]
     action_cycle = [
@@ -232,7 +257,7 @@ def _make_scene(number, act, plan, series):
 async def generate_story_with_llm():
     await wait_for_ollama(max_retries=30, delay=1)
     series = _series_bible()
-    plan = await _compact_story_plan(series)
+    plan = _normalize_plan(await _compact_story_plan(series), series)
     total_scenes = int(os.getenv("TOTAL_SCENES", "80"))
     acts = plan.get("acts", [])
     scenes = [_make_scene(i, acts, plan, series) for i in range(1, total_scenes + 1)]
