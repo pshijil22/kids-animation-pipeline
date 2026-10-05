@@ -12,7 +12,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,7 +59,7 @@ jobs:
           VIDEO_PRESET: veryfast
           CINEMATIC_PREVIEW: 'false'
           CINEMATIC_SCENE_SECONDS: '15.0'
-          BLENDER_RENDER_FPS: '2'
+          BLENDER_RENDER_FPS: '1'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
           BLENDER_SHARDS: '8'
