@@ -21,59 +21,126 @@ MIN_SECONDS=80 if PREVIEW else 1140
 MAX_SECONDS=110 if PREVIEW else 1260
 
 def _run_blender(story_file,output_file):
-    """Render the episode in parallel Blender shards, then stitch losslessly."""
-    blender,ffmpeg=shutil.which("blender"),shutil.which("ffmpeg")
-    if not blender or not ffmpeg: raise RuntimeError("Blender and FFmpeg must be installed.")
-    story=json.loads(Path(story_file).read_text(encoding="utf-8"))
-    scenes=story.get("scenes",[])
-    requested=int(os.getenv("BLENDER_SHARDS","4"))
-    shard_count=max(1,min(requested,len(scenes) or 1))
-    shard_size=math.ceil(len(scenes)/shard_count)
-    work_dir=output_file.with_name(output_file.stem+"_shards")
-    work_dir.mkdir(parents=True,exist_ok=True)
+    """Render one cinematic keyframe per scene, then create motion in FFmpeg.
+
+    GitHub-hosted CPU runners are not suitable for rendering thousands of
+    Blender frames for a 20-minute episode. Blender therefore creates the
+    detailed 3D composition and character pose once per scene; FFmpeg turns
+    those keyframes into smooth 30fps camera-motion clips.
+    """
+    blender, ffmpeg = shutil.which("blender"), shutil.which("ffmpeg")
+    if not blender or not ffmpeg:
+        raise RuntimeError("Blender and FFmpeg must be installed.")
+    story = json.loads(Path(story_file).read_text(encoding="utf-8"))
+    scenes = story.get("scenes", [])
+    requested = int(os.getenv("BLENDER_SHARDS", "8"))
+    shard_count = max(1, min(requested, len(scenes) or 1))
+    shard_size = math.ceil(len(scenes) / shard_count)
+    work_dir = output_file.with_name(output_file.stem + "_shards")
+    work_dir.mkdir(parents=True, exist_ok=True)
 
     def render_one(index):
-        first=index*shard_size
-        shard_scenes=scenes[first:first+shard_size]
-        shard_story=dict(story)
-        shard_story["scenes"]=shard_scenes
-        shard_story_file=work_dir/("story_%02d.json"%index)
-        shard_output=work_dir/("part_%02d.mp4"%index)
-        shard_frames=work_dir/("frames_%02d"%index)
-        shard_frames.mkdir(parents=True,exist_ok=True)
-        shard_story_file.write_text(json.dumps(shard_story,ensure_ascii=False),encoding="utf-8")
-        command=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--free-blender-render","--story",str(shard_story_file.resolve()),"--output",str((shard_frames/"frame_####").resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
-        result=subprocess.run(command,capture_output=True,text=True,timeout=60*60)
+        first = index * shard_size
+        shard_scenes = scenes[first:first + shard_size]
+        shard_story = dict(story)
+        shard_story["scenes"] = shard_scenes
+        shard_story_file = work_dir / ("story_%02d.json" % index)
+        shard_frames = work_dir / ("frames_%02d" % index)
+        shard_frames.mkdir(parents=True, exist_ok=True)
+        shard_story_file.write_text(
+            json.dumps(shard_story, ensure_ascii=False), encoding="utf-8"
+        )
+        command = [
+            blender, "--background", "--enable-autoexec", "--python",
+            str(Path(__file__).resolve()), "--",
+            "--free-blender-render", "--single-frame-scenes",
+            "--story", str(shard_story_file.resolve()),
+            "--output", str((shard_frames / "scene_####.jpg").resolve()),
+            "--fps", str(FPS), "--width", str(WIDTH), "--height", str(HEIGHT),
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=30 * 60
+        )
         if result.returncode:
-            logger.error("Blender shard %s stdout: %s",index,result.stdout[-5000:])
-            logger.error("Blender shard %s stderr: %s",index,result.stderr[-7000:])
-            raise RuntimeError("Blender shard %s failed"%index)
-        frames=sorted(shard_frames.rglob("frame_*.jpg"))
-        if len(frames)<max(30,FPS*8) or not (shard_frames/"frame_0001.jpg").exists():
-            logger.error("Blender shard %s produced %s frames",index,len(frames))
-            raise RuntimeError("Blender shard %s did not produce enough frames"%index)
-        frame_pattern=shard_frames/"frame_%04d.jpg"
-        encode=[ffmpeg,"-y","-loglevel","warning","-framerate",str(FPS),"-start_number","1","-i",str(frame_pattern),"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","slow"),"-b:v",os.getenv("VIDEO_BITRATE","1400k"),"-maxrate",os.getenv("VIDEO_MAXRATE","1600k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","3200k"),"-pix_fmt","yuv420p","-movflags","+faststart",str(shard_output)]
-        encoded=subprocess.run(encode,capture_output=True,text=True,timeout=60*60)
+            logger.error("Blender shard %s stdout: %s", index, result.stdout[-5000:])
+            logger.error("Blender shard %s stderr: %s", index, result.stderr[-7000:])
+            raise RuntimeError("Blender shard %s failed" % index)
+
+        frames = sorted(shard_frames.glob("scene_*.jpg"))
+        if len(frames) != len(shard_scenes):
+            logger.error(
+                "Blender shard %s produced %s keyframes for %s scenes",
+                index, len(frames), len(shard_scenes)
+            )
+            raise RuntimeError("Blender shard %s did not produce all scene keyframes" % index)
+
+        concat_file = work_dir / ("images_%02d.txt" % index)
+        with concat_file.open("w", encoding="utf-8") as f:
+            for frame_path in frames:
+                safe = frame_path.resolve().as_posix().replace("'", "'\\''")
+                f.write("file '%s'\\n" % safe)
+                f.write("duration %.3f\\n" % SCENE_SECONDS)
+            safe = frames[-1].resolve().as_posix().replace("'", "'\\''")
+            f.write("file '%s'\\n" % safe)
+
+        shard_output = work_dir / ("part_%02d.mp4" % index)
+        motion = (
+            "zoompan="
+            "z='min(zoom+0.0012,1.10)':"
+            "x='iw/2-(iw/zoom/2)':"
+            "y='ih/2-(ih/zoom/2)':"
+            "d=450:s=%sx%s:fps=30,"
+            "format=yuv420p"
+        ) % (WIDTH, HEIGHT)
+        encode = [
+            ffmpeg, "-y", "-loglevel", "warning",
+            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-vf", motion,
+            "-c:v", "libx264", "-preset", os.getenv("VIDEO_PRESET", "veryfast"),
+            "-b:v", os.getenv("VIDEO_BITRATE", "1400k"),
+            "-maxrate", os.getenv("VIDEO_MAXRATE", "1600k"),
+            "-bufsize", os.getenv("VIDEO_BUFSIZE", "3200k"),
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            str(shard_output),
+        ]
+        encoded = subprocess.run(
+            encode, capture_output=True, text=True, timeout=30 * 60
+        )
         if encoded.returncode or not shard_output.exists():
-            logger.error("FFmpeg shard %s stderr: %s",index,encoded.stderr[-6000:])
-            raise RuntimeError("FFmpeg shard %s failed"%index)
-        shutil.rmtree(shard_frames,ignore_errors=True)
+            logger.error("FFmpeg shard %s stderr: %s", index, encoded.stderr[-6000:])
+            raise RuntimeError("FFmpeg shard %s failed" % index)
+        shutil.rmtree(shard_frames, ignore_errors=True)
+        concat_file.unlink(missing_ok=True)
         return shard_output
 
     from concurrent.futures import ThreadPoolExecutor
-    logger.info("Rendering %s scenes in %s parallel Blender shards (%sx%s/%sfps)",len(scenes),shard_count,WIDTH,HEIGHT,FPS)
+    logger.info(
+        "Rendering %s scenes as %s keyframe shards at %sx%s",
+        len(scenes), shard_count, WIDTH, HEIGHT
+    )
     with ThreadPoolExecutor(max_workers=shard_count) as pool:
-        parts=list(pool.map(render_one,range(shard_count)))
+        parts = list(pool.map(render_one, range(shard_count)))
 
-    concat_file=work_dir/"concat.txt"
-    concat_file.write_text("".join("file '%s'\n"%p.resolve().as_posix().replace("'","'\\''") for p in parts),encoding="utf-8")
-    command=[ffmpeg,"-y","-loglevel","warning","-f","concat","-safe","0","-i",str(concat_file),"-c","copy","-movflags","+faststart",str(output_file)]
-    result=subprocess.run(command,capture_output=True,text=True,timeout=30*60)
+    concat_file = work_dir / "concat.txt"
+    concat_file.write_text(
+        "".join(
+            "file '%s'\n" % p.resolve().as_posix().replace("'", "'\\''")
+            for p in parts
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            ffmpeg, "-y", "-loglevel", "warning", "-f", "concat", "-safe", "0",
+            "-i", str(concat_file), "-c", "copy", "-movflags", "+faststart",
+            str(output_file)
+        ],
+        capture_output=True, text=True, timeout=30 * 60,
+    )
     if result.returncode or not output_file.exists():
-        logger.error("FFmpeg concat stderr: %s",result.stderr[-6000:])
+        logger.error("FFmpeg concat stderr: %s", result.stderr[-6000:])
         raise RuntimeError("FFmpeg could not stitch the cinematic shards")
-    shutil.rmtree(work_dir,ignore_errors=True)
+    shutil.rmtree(work_dir, ignore_errors=True)
 
 def _concat_audio_video(video,narration,subtitles,output):
     sub=str(subtitles.resolve()).replace(chr(92),"/").replace(":","\:")
@@ -140,71 +207,109 @@ def _blender_render():
     scene.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
     scene.render.resolution_x,scene.render.resolution_y=width,height; scene.render.resolution_percentage=100; scene.render.fps=fps
     scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.use_file_extension=True; scene.render.filepath=str(output); scene.render.use_file_extension=True
-    scene.frame_start,scene.frame_end=1,total_frames
-    try: scene.view_settings.look="AgX - Medium High Contrast"
-    except Exception: pass
-    world=bpy.data.worlds.new("CinematicWorld") if not bpy.data.worlds else bpy.data.worlds[0]; scene.world=world; world.use_nodes=True
-    bg=world.node_tree.nodes.get("Background"); bg.inputs["Strength"].default_value=.32
+    scene.frame_start, scene.frame_end = 1, total_frames
+    try:
+        scene.view_settings.look = "AgX - Medium High Contrast"
+    except Exception:
+        pass
+    world = bpy.data.worlds.new("CinematicWorld") if not bpy.data.worlds else bpy.data.worlds[0]
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    bg.inputs["Strength"].default_value = .32
 
-    ground=mat("Ground",(.18,.32,.15),.82); sand=mat("Sand",(.72,.56,.34),.9); water=mat("Water",(.06,.30,.48),.2)
-    leaf=mat("Leaves",(.10,.40,.16),.72); wood=mat("Wood",(.24,.11,.05),.88); rock=mat("Rock",(.30,.32,.34),.92)
-    white=mat("Foam",(.93,.96,.94),.4); eye=mat("Eye",(.97,.98,.94),.2); pupil=mat("Pupil",(.01,.008,.012),.15); mouth=mat("Mouth",(.16,.02,.018),.35)
-    sphere("Ground",(0,2,-.85),(18,16,.65),ground); sphere("Sand",(0,-5,-.48),(17,8,.32),sand); sphere("Water",(0,-12,-.22),(17,7,.12),water)
-    for x,y,s in [(-8,4,1.6),(-5,7,1),(7,5,1.4),(9,1,1.1),(-10,-1,.9),(6,-3,.8)]:
-        sphere("Trunk",(x,y,1*s),(.14*s,.14*s,1*s),wood); sphere("Canopy",(x,y,2.2*s),(1.1*s,.9*s,1.2*s),leaf)
-    for x,y,s in [(-5,1,1),(4,3,.8),(8,-2,1.1),(-8,-3,.65)]: sphere("Rock",(x,y,.02),(s,s*.7,s*.4),rock)
-    for y in (-7,-8.2,-9.4): curve("Wave",[(-14,y,0),(-7,y+.35,.08),(0,y,.02),(7,y-.3,.08),(14,y,0)],.045,white)
+    ground = mat("Ground", (.18, .32, .15), .82)
+    sand = mat("Sand", (.72, .56, .34), .9)
+    water = mat("Water", (.06, .30, .48), .2)
+    leaf = mat("Leaves", (.10, .40, .16), .72)
+    wood = mat("Wood", (.24, .11, .05), .88)
+    rock = mat("Rock", (.30, .32, .34), .92)
+    white = mat("Foam", (.93, .96, .94), .4)
+    eye = mat("Eye", (.97, .98, .94), .2)
+    pupil = mat("Pupil", (.01, .008, .012), .15)
+    mouth = mat("Mouth", (.16, .02, .018), .35)
+    sphere("Ground", (0, 2, -.85), (18, 16, .65), ground)
+    sphere("Sand", (0, -5, -.48), (17, 8, .32), sand)
+    sphere("Water", (0, -12, -.22), (17, 7, .12), water)
+    for x, y, s in [(-8,4,1.6),(-5,7,1),(7,5,1.4),(9,1,1.1),(-10,-1,.9),(6,-3,.8)]:
+        sphere("Trunk", (x,y,1*s), (.14*s,.14*s,1*s), wood)
+        sphere("Canopy", (x,y,2.2*s), (1.1*s,.9*s,1.2*s), leaf)
+    for x, y, s in [(-5,1,1),(4,3,.8),(8,-2,1.1),(-8,-3,.65)]:
+        sphere("Rock", (x,y,.02), (s,s*.7,s*.4), rock)
+    for y in (-7,-8.2,-9.4):
+        curve("Wave", [(-14,y,0),(-7,y+.35,.08),(0,y,.02),(7,y-.3,.08),(14,y,0)], .045, white)
 
-    def prop_for(text, material_map):
-        t=(text or "").lower()
-        choices=[
-            (("box","chest","treasure"),"box"),(("key",),"key"),(("map","paper","letter"),"map"),
-            (("book","storybook"),"book"),(("ball","toy"),"ball"),(("flower","rose","plant"),"flower"),
-            (("shell",),"shell"),(("lantern","lamp"),"lantern"),(("boat","ship"),"boat"),
-            (("kite",),"kite"),(("apple","fruit"),"apple"),(("cookie","cake"),"cookie"),
-            (("backpack","bag"),"backpack"),(("bridge",),"bridge"),(("star","moon"),"star"),
-            (("stick","branch"),"stick"),(("stone","rock","pebble"),"stone")
+    def prop_for(text):
+        t = (text or "").lower()
+        choices = [
+            (("box","chest","treasure"),"box"), (("key",),"key"),
+            (("map","paper","letter"),"map"), (("book","storybook"),"book"),
+            (("ball","toy"),"ball"), (("flower","rose","plant"),"flower"),
+            (("shell",),"shell"), (("lantern","lamp"),"lantern"),
+            (("boat","ship"),"boat"), (("kite",),"kite"),
+            (("apple","fruit"),"apple"), (("cookie","cake"),"cookie"),
+            (("backpack","bag"),"backpack"), (("bridge",),"bridge"),
+            (("star","moon"),"star"), (("stick","branch"),"stick"),
+            (("stone","rock","pebble"),"stone")
         ]
-        for words,kind in choices:
-            if any(w in t for w in words): return kind
+        for words, kind in choices:
+            if any(w in t for w in words):
+                return kind
         return None
-    def make_prop(kind,materials):
-        if not kind: return None
-        wood,metal,blue,red,yellow,green=materials
-        if kind=="box": return sphere("StoryBox",(0,0,.65),(.62,.52,.45),wood)
-        if kind=="key": return curve("StoryKey",[(-.45,0,.65),(.2,0,.65),(.35,0,.82)],.07,metal)
-        if kind=="map": return sphere("StoryMap",(0,0,.5),(.7,.08,.5),yellow)
-        if kind=="book": return sphere("StoryBook",(0,0,.55),(.55,.32,.12),red)
-        if kind in ("ball","apple","cookie","stone","shell"): return sphere("StoryObject",(0,0,.6),(.38,.38,.38),red if kind=="apple" else yellow if kind=="cookie" else blue)
-        if kind=="flower": return curve("StoryFlower",[(0,0,.2),(0,0,.8),(0,0,1.2)],.035,green)
-        if kind=="lantern": return sphere("StoryLantern",(0,0,.8),(.3,.3,.5),yellow)
-        if kind=="boat": return sphere("StoryBoat",(0,-1,.2),(1.2,.45,.25),blue)
-        if kind=="kite": return curve("StoryKite",[(0,0,1),(0,0,2)],.025,red)
-        if kind=="backpack": return sphere("StoryBag",(0,.35,1),(.55,.25,.65),blue)
-        if kind=="bridge": return curve("StoryBridge",[(-2,0,.3),(0,0,.7),(2,0,.3)],.22,wood)
-        if kind=="star": return sphere("StoryStar",(0,0,1.3),(.25,.25,.25),yellow)
-        if kind=="stick": return curve("StoryStick",[(-.5,0,.5),(.5,0,.8)],.08,wood)
+
+    def make_prop(kind):
+        if not kind:
+            return None
+        if kind == "box": return sphere("StoryBox",(0,0,.65),(.62,.52,.45),wood)
+        if kind == "key": return curve("StoryKey",[(-.45,0,.65),(.2,0,.65),(.35,0,.82)],.07,rock)
+        if kind == "map": return sphere("StoryMap",(0,0,.5),(.7,.08,.5),sand)
+        if kind == "book": return sphere("StoryBook",(0,0,.55),(.55,.32,.12),wood)
+        if kind in ("ball","apple","cookie","stone","shell"):
+            return sphere("StoryObject",(0,0,.6),(.38,.38,.38),rock if kind=="stone" else sand)
+        if kind == "flower": return curve("StoryFlower",[(0,0,.2),(0,0,.8),(0,0,1.2)],.035,leaf)
+        if kind == "lantern": return sphere("StoryLantern",(0,0,.8),(.3,.3,.5),sand)
+        if kind == "boat": return sphere("StoryBoat",(0,-1,.2),(1.2,.45,.25),water)
+        if kind == "kite": return curve("StoryKite",[(0,0,1),(0,0,2)],.025,rock)
+        if kind == "backpack": return sphere("StoryBag",(0,.35,1),(.55,.25,.65),water)
+        if kind == "bridge": return curve("StoryBridge",[(-2,0,.3),(0,0,.7),(2,0,.3)],.22,wood)
+        if kind == "star": return sphere("StoryStar",(0,0,1.3),(.25,.25,.25),sand)
+        if kind == "stick": return curve("StoryStick",[(-.5,0,.5),(.5,0,.8)],.08,wood)
         return None
-    prop_mats=(wood,rock,water,white,leaf,sand)
 
-    def light(name,energy,size,loc,color):
-        d=bpy.data.lights.new(name,"AREA"); d.energy=energy; d.shape="DISK"; d.size=size; d.color=color
-        o=bpy.data.objects.new(name,d); bpy.context.collection.objects.link(o); o.location=loc; return o
-    light("Key",850,6,(-5,-4,10),(1,.72,.50)); light("Fill",520,8,(6,-1,6),(.48,.68,1)); light("Rim",700,5,(0,7,7),(1,.55,.30))
+    def light(name, energy, size, loc, color):
+        d = bpy.data.lights.new(name, "AREA")
+        d.energy, d.shape, d.size, d.color = energy, "DISK", size, color
+        o = bpy.data.objects.new(name, d); bpy.context.collection.objects.link(o); o.location = loc
+        return o
+    light("Key",850,6,(-5,-4,10),(1,.72,.50))
+    light("Fill",520,8,(6,-1,6),(.48,.68,1))
+    light("Rim",700,5,(0,7,7),(1,.55,.30))
 
-    cd=bpy.data.cameras.new("Camera"); camera=bpy.data.objects.new("Camera",cd); bpy.context.collection.objects.link(camera); scene.camera=camera
-    cd.dof.use_dof=True; cd.dof.aperture_fstop=2.2; focus=bpy.data.objects.new("Focus",None); bpy.context.collection.objects.link(focus); cd.dof.focus_object=focus
+    cd = bpy.data.cameras.new("Camera")
+    camera = bpy.data.objects.new("Camera", cd)
+    bpy.context.collection.objects.link(camera)
+    scene.camera = camera
+    cd.lens = 50
+    cd.dof.use_dof = True
+    cd.dof.aperture_fstop = 2.4
+    focus = bpy.data.objects.new("Focus", None)
+    bpy.context.collection.objects.link(focus)
+    cd.dof.focus_object = focus
 
-    palettes=[(.88,.32,.16),(.18,.48,.78),(.62,.24,.66)]
-    heroes=[]
-    characters=story.get("characters",[])
-    if isinstance(characters,dict):
-        characters=list(characters.values())
-    elif not isinstance(characters,list):
-        characters=[]
-    for idx,_unused in enumerate(characters[:3]):
-        bm=mat("Hero%d"%idx,palettes[idx%3],.48); root=bpy.data.objects.new("HeroRoot%d"%idx,None); bpy.context.collection.objects.link(root)
-        body=sphere("Body%d"%idx,(0,0,1.15),(.78,.58,.92),bm); head=sphere("Head%d"%idx,(0,-.02,2.15),(.72,.65,.68),bm); body.parent=root; head.parent=root
+    palettes = [(.88,.32,.16),(.18,.48,.78),(.62,.24,.66)]
+    heroes = []
+    characters = story.get("characters", [])
+    if isinstance(characters, dict):
+        characters = list(characters.values())
+    elif not isinstance(characters, list):
+        characters = []
+    for idx, _unused in enumerate(characters[:3]):
+        bm = mat("Hero%d" % idx, palettes[idx % 3], .48)
+        root = bpy.data.objects.new("HeroRoot%d" % idx, None)
+        bpy.context.collection.objects.link(root)
+        body = sphere("Body%d" % idx,(0,0,1.15),(.78,.58,.92),bm)
+        head = sphere("Head%d" % idx,(0,-.02,2.15),(.72,.65,.68),bm)
+        body.parent = root; head.parent = root
         arms=[]; legs=[]; pupils=[]; brows=[]
         for side in (-1,1):
             e=sphere("Eye",(side*.25,-.59,2.25),(.15,.08,.18),eye); e.parent=root
@@ -212,80 +317,77 @@ def _blender_render():
             b=curve("Brow",[(side*.39,-.64,2.49),(side*.15,-.68,2.54)],.025,pupil); b.parent=root
             a=sphere("Arm",(side*.78,-.02,1.35),(.18,.18,.62),bm); a.parent=root; arms.append(a)
             l=sphere("Leg",(side*.34,.02,.47),(.20,.20,.58),bm); l.parent=root; legs.append(l)
-            ear=sphere("Ear",(side*.42,.02,2.70),(.24,.18,.48),bm); ear.parent=root; ears=[]
+            ear=sphere("Ear",(side*.42,.02,2.70),(.24,.18,.48),bm); ear.parent=root
             pupils.append(p); brows.append(b)
         m=curve("Mouth",[(-.18,-.66,1.95),(0,-.70,1.90),(.18,-.66,1.95)],.035,mouth); m.parent=root
         tail=curve("Tail",[(0,.45,1.35),(.45,.72,1.48),(.82,.70,1.85)],.13,bm); tail.parent=root
         heroes.append({"root":root,"body":body,"arms":arms,"legs":legs,"pupils":pupils,"brows":brows,"mouth":m,"tail":tail})
 
-    def animate(h,action,emotion,start,end,lane):
-        text=(action or "").lower(); moving=any(w in text for w in ("run","walk","chase","follow","move","rush","approach")); jumping=any(w in text for w in ("jump","leap","hop"))
-        x0=-1+lane*1.05; x1=x0+(2.7 if moving else .5); mid=start+(end-start)//2
-        key(h["root"],start,(x0,0,0),(0,0,0)); key(h["root"],mid,((x0+x1)/2,0,.65 if jumping else .08),(0,0,math.radians(-7))); key(h["root"],end,(x1,0,.35 if jumping else 0),(0,0,math.radians(-5)))
-        for j,l in enumerate(h["legs"]):
-            a=math.radians(24 if j==0 and moving else -24 if moving else 0); key(l,start,rot=(0,a,0)); key(l,mid,rot=(0,-a,0)); key(l,end,rot=(0,a,0))
-        for j,aobj in enumerate(h["arms"]):
-            a=math.radians(-25 if j==0 else 15)
-            if "wave" in text: a=math.radians(-42 if j==0 else 8)
-            if any(w in text for w in ("reach","grab","pick")): a=math.radians(-34)
-            key(aobj,start,rot=(0,a,0)); key(aobj,mid,rot=(0,-a*.7,0)); key(aobj,end,rot=(0,a*.4,0))
-        key(h["body"],start,scale=(.78,.58,.92)); key(h["body"],mid,scale=(.80,.60,.95)); key(h["body"],end,scale=(.78,.58,.92))
-        e=(emotion or "").lower(); worried=any(w in e for w in ("worried","sad","scared","nervous")); smile=any(w in e for w in ("happy","joy","excited","proud","brave"))
+    def pose(h, action, emotion, frame_no, lane):
+        text = (action or "").lower()
+        moving = any(w in text for w in ("run","walk","chase","follow","move","rush","approach"))
+        jumping = any(w in text for w in ("jump","leap","hop"))
+        x = -1 + lane * 1.05 + (1.2 if moving else 0)
+        z = .35 if jumping else 0
+        key(h["root"], frame_no, (x, 0, z), (0, 0, math.radians(-6 if moving else 0)))
+        for j, l in enumerate(h["legs"]):
+            key(l, frame_no, rot=(0, math.radians(18 if moving and j == 0 else -12 if moving else 0), 0))
+        for j, aobj in enumerate(h["arms"]):
+            angle = -32 if "wave" in text and j == 0 else 18
+            if any(w in text for w in ("reach","grab","pick")):
+                angle = -34
+            key(aobj, frame_no, rot=(0, math.radians(angle), 0))
+        e=(emotion or "").lower()
+        worried=any(w in e for w in ("worried","sad","scared","nervous"))
+        smile=any(w in e for w in ("happy","joy","excited","proud","brave"))
         for b in h["brows"]:
-            r=math.radians(-12 if worried else 5 if smile else 0); key(b,start,rot=(0,0,r)); key(b,end,rot=(0,0,r))
-        blink=start+int(1.8*fps)
-        for p in h["pupils"]: key(p,blink,scale=(.065,.025,.02)); key(p,blink+max(1,fps//8),scale=(.065,.025,.09))
+            key(b, frame_no, rot=(0,0,math.radians(-12 if worried else 5 if smile else 0)))
 
-    def shot(style,start,end,target,n):
-        s=(style or "").lower()
-        if "close" in s or n%5==2: lens,p0,p1,fs=85,(0,-5.3,2.8),(.35,-4.6,2.5),1.7
-        elif "wide" in s or n%5==0: lens,p0,p1,fs=28,(0,-13,6.2),(1,-11,5.3),3.2
-        elif "low" in s: lens,p0,p1,fs=45,(-3.8,-7,1.8),(2.8,-6,2.4),2.4
-        elif "overhead" in s: lens,p0,p1,fs=35,(0,-3,9),(1,-1,4.5),3
-        else: lens,p0,p1,fs=50,(0,-8.5,4),(1,-7,3.1),2.5
-        cd.lens=lens; cd.dof.aperture_fstop=fs; camera.location=p0; aim(camera,target,start); camera.keyframe_insert("location",frame=start)
-        camera.location=p1; aim(camera,(target[0]+.3,target[1],target[2]),end); camera.keyframe_insert("location",frame=end)
-        focus.location=target; focus.keyframe_insert("location",frame=start); focus.location=(target[0]+.2,target[1],target[2]); focus.keyframe_insert("location",frame=end)
+    def compose_scene(sc, scene_no):
+        frame_no = 1
+        beats = sc.get("visual_beats") or []
+        if len(beats) < 3:
+            beats = beats + [{}] * (3 - len(beats))
+        beat = beats[1] if len(beats) > 1 else beats[0]
+        action = str(beat.get("action") or sc.get("action") or "")
+        subject = str(beat.get("subject") or sc.get("character_actions") or "")
+        emotion = str(sc.get("emotion") or "curious")
+        for idx, h in enumerate(heroes):
+            pose(h, action + " " + subject, emotion, frame_no, idx)
+        prop = prop_for(str(beat.get("prop") or sc.get("props") or ""))
+        obj = make_prop(prop)
+        if obj:
+            obj.location = (.25, -.4, .9)
+            obj.rotation_euler = (0, 0, math.radians(8 if scene_no % 2 else -8))
+        style = str(beat.get("camera") or sc.get("camera") or "").lower()
+        if "close" in style:
+            camera.location = (.2,-5.5,2.8); cd.lens = 78
+        elif "wide" in style:
+            camera.location = (0,-12,5.8); cd.lens = 32
+        elif "low" in style:
+            camera.location = (-3.5,-7,1.7); cd.lens = 48
+        else:
+            camera.location = (0,-8.5,3.7); cd.lens = 52
+        target = (.2,-.4,1.7)
+        aim(camera, target, frame_no)
+        focus.location = target
+        scene.frame_set(frame_no)
 
-    frame=1; shot_no=0
-    for i,sc in enumerate(scenes):
-        dur=float(sc.get("duration_seconds",SCENE_SECONDS)); start=frame; end=frame+int(dur*fps)-1; third=max(1,(end-start+1)//3)
-        beats=sc.get("visual_beats") or []
-        while len(beats)<3: beats.append({"action":sc.get("action",""),"prop":sc.get("props",""),"camera":sc.get("camera",""),"subject":sc.get("character_actions","")})
-        for bidx,beat in enumerate(beats[:3]):
-            bs=start+bidx*third
-            be=end if bidx==2 else start+(bidx+1)*third-1
-            beat_text=" ".join(str(beat.get(k,"")) for k in ("narration_line","subject","action","prop"))
-            beat_action=str(beat.get("action") or sc.get("action") or "")
-            beat_subject=str(beat.get("subject") or sc.get("character_actions") or "")
-            beat_emotion=str(sc.get("emotion") or "curious")
-            for idx,h in enumerate(heroes):
-                animate(h, beat_action+" "+beat_subject, beat_emotion, bs, be, idx)
-            beat_kind=prop_for(beat_text, prop_mats)
-            beat_prop=make_prop(beat_kind, prop_mats)
-            target=(-.2+(i%3)*.4,-.35,1.8)
-            if beat_prop:
-                beat_prop.location=(.15,-.55,.55); beat_prop.keyframe_insert("location",frame=bs)
-                beat_prop.location=(.25,-.25,.85); beat_prop.keyframe_insert("location",frame=be)
-                beat_prop.scale=(1,1,1); beat_prop.keyframe_insert("scale",frame=bs)
-                beat_prop.scale=(1.08,1.08,1.08); beat_prop.keyframe_insert("scale",frame=be)
-                if any(w in beat_action.lower() for w in ("open","reveal","turn","lift")):
-                    key(beat_prop,bs,rot=(0,0,math.radians(-8))); key(beat_prop,be,rot=(0,math.radians(35),math.radians(8)))
-                target=(.25,-.4,.9)
-            if not beat_kind:
-                target=(-.2+(i%3)*.4,-.35,1.8)
-            shot(str(beat.get("camera") or sc.get("camera") or ""),bs,be,target,shot_no)
-            shot_no+=1
-        frame=end+1
-    for o in list(bpy.data.objects):
-        if o.animation_data and o.animation_data.action:
-            for fc in o.animation_data.action.fcurves:
-                for kp in fc.keyframe_points: kp.interpolation="BEZIER"
-    scene.frame_set(1); bpy.ops.wm.save_as_mainfile(filepath=str(output.parent/"scene.blend"))
-    print("CINEMATIC_RENDER_START", total_frames, fps, width, height, flush=True)
-    result=bpy.ops.render.render(animation=True)
-    print("CINEMATIC_RENDER_RESULT", result, flush=True)
-    if "FINISHED" not in result: raise RuntimeError("Blender animation render did not finish")
+    single = "--single-frame-scenes" in sys.argv
+    if single:
+        for scene_index, sc in enumerate(scenes, 1):
+            # Remove scene-specific props from the previous composition.
+            for obj in list(bpy.data.objects):
+                if obj.name.startswith("Story"):
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            compose_scene(sc, scene_index)
+            scene.render.filepath = str(output.parent / ("scene_%04d.jpg" % scene_index))
+            bpy.ops.render.render(write_still=True)
+        print("CINEMATIC_KEYFRAMES_DONE", len(scenes), flush=True)
+    else:
+        scene.frame_set(1)
+        bpy.ops.wm.save_as_mainfile(filepath=str(output.parent / "scene.blend"))
+        bpy.ops.render.render(animation=True)
+        print("CINEMATIC_RENDER_RESULT", "FINISHED", flush=True)
 
-if "--free-blender-render" in sys.argv:
-    _blender_render()
+
