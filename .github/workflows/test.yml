@@ -57,12 +57,13 @@ jobs:
           VIDEO_MAXRATE: '1600k'
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: veryfast
+          TOTAL_SCENES: '80'
           CINEMATIC_PREVIEW: 'false'
           CINEMATIC_SCENE_SECONDS: '15.0'
           BLENDER_RENDER_FPS: '1'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
-          BLENDER_SHARDS: '8'
+          BLENDER_SHARDS: '4'
           TTS_ENGINE: piper
           TTS_VOICE: en-us
           PIPER_MODEL: en_US-lessac-high
