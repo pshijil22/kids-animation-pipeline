@@ -31,38 +31,59 @@ def _duration(path):
     return float(r.stdout.strip()) if r.stdout.strip() else 0.0
 
 
+def _resolve_piper_model():
+    """Return a local Piper model, downloading it once when needed."""
+    VOICE_DIR.mkdir(parents=True, exist_ok=True)
+    requested = Path(PIPER_MODEL)
+    if requested.exists():
+        return requested
+    candidate = VOICE_DIR / (PIPER_MODEL + ".onnx")
+    if candidate.exists():
+        return candidate
+    result = subprocess.run(
+        [
+            os.sys.executable, "-m", "piper.download_voices",
+            PIPER_MODEL, "--data-dir", str(VOICE_DIR),
+        ],
+        capture_output=True, text=True, timeout=300,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            "Could not download Piper voice %s: %s"
+            % (PIPER_MODEL, result.stderr[-2000:])
+        )
+    if candidate.exists():
+        return candidate
+    matches = sorted(VOICE_DIR.glob(PIPER_MODEL + "*.onnx"))
+    if matches:
+        return matches[0]
+    raise RuntimeError("Piper voice model was not created: %s" % PIPER_MODEL)
+
+
 def _speak(text, out):
     piper = shutil.which("piper")
     if piper:
-        r = subprocess.run(
-            [
-                piper,
-                "--model",
-                PIPER_MODEL,
-                "--output_file",
-                str(out),
-                "--length_scale",
-                os.getenv("PIPER_LENGTH_SCALE", "1.0"),
-                "--noise_scale",
-                os.getenv("PIPER_NOISE_SCALE", "0.667"),
-                "--noise_w",
-                os.getenv("PIPER_NOISE_W", "0.333"),
-            ],
-            input=text,
-            text=True,
-            capture_output=True,
-            timeout=180,
-        )
-        if r.returncode == 0 and out.exists() and out.stat().st_size > 1000:
-            return
+        try:
+            model = _resolve_piper_model()
+            r = subprocess.run(
+                [
+                    piper, "--model", str(model), "--output_file", str(out),
+                    "--length_scale", os.getenv("PIPER_LENGTH_SCALE", "1.0"),
+                    "--noise_scale", os.getenv("PIPER_NOISE_SCALE", "0.667"),
+                    "--noise_w", os.getenv("PIPER_NOISE_W", "0.333"),
+                ],
+                input=text, text=True, capture_output=True, timeout=180,
+            )
+            if r.returncode == 0 and out.exists() and out.stat().st_size > 1000:
+                return
+        except Exception:
+            pass
     binary = shutil.which("espeak-ng") or shutil.which("espeak")
     if not binary:
         raise RuntimeError("Piper TTS failed and espeak-ng is not installed")
     r = subprocess.run(
         [binary, "-v", VOICE, "-s", "145", "-p", "52", "-w", str(out), text],
-        capture_output=True,
-        text=True,
-        timeout=60,
+        capture_output=True, text=True, timeout=60,
     )
     if r.returncode:
         raise RuntimeError(r.stderr[-1500:] or "TTS failed")
