@@ -151,8 +151,7 @@ async def generate_narration_from_story(story, job_id):
     concat = AUDIO_DIR / f"{job_id}_concat.txt"
     with concat.open("w", encoding="utf-8") as f:
         for p in files:
-            f.write(f"file '{Path(p).resolve()}'
-")
+            f.write(f"file '{Path(p).resolve()}'\\n")
     narration = AUDIO_DIR / f"{job_id}_narration.wav"
     r = subprocess.run(
         [
@@ -181,12 +180,7 @@ async def generate_narration_from_story(story, job_id):
     srt = AUDIO_DIR / f"{job_id}_subtitles.srt"
     with srt.open("w", encoding="utf-8") as f:
         for idx, start, spoken, title, text in entries:
-            f.write(f"{idx}
-{_srt(start)} --> {_srt(start + spoken)}
-{title}
-{text}
-
-")
+            f.write(f"{idx}\\n{_srt(start)} --> {_srt(start + spoken)}\\n{title}\\n{text}\\n\\n")
     return {
         "narration_file": str(narration),
         "subtitles_file": str(srt),
