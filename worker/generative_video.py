@@ -402,4 +402,5 @@ def _blender_render():
         bpy.ops.render.render(animation=True)
         print("CINEMATIC_RENDER_RESULT", "FINISHED", flush=True)
 
-
+if __name__ == "__main__" and "--free-blender-render" in sys.argv:
+    _blender_render()
