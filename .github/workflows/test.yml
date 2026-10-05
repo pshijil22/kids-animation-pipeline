@@ -63,7 +63,7 @@ jobs:
           BLENDER_RENDER_FPS: '1'
           BLENDER_RENDER_WIDTH: '640'
           BLENDER_RENDER_HEIGHT: '360'
-          BLENDER_SHARDS: '4'
+          BLENDER_SHARDS: '8'
           TTS_ENGINE: piper
           TTS_VOICE: en-us
           PIPER_MODEL: en_US-lessac-high
