@@ -80,10 +80,10 @@ def _run_blender(story_file,output_file):
         with concat_file.open("w", encoding="utf-8") as f:
             for frame_path in frames:
                 safe = frame_path.resolve().as_posix().replace("'", "'\\''")
-                f.write("file '%s'\\n" % safe)
-                f.write("duration %.3f\\n" % SCENE_SECONDS)
+                f.write("file '%s'\n" % safe)
+                f.write("duration %.3f\n" % SCENE_SECONDS)
             safe = frames[-1].resolve().as_posix().replace("'", "'\\''")
-            f.write("file '%s'\\n" % safe)
+            f.write("file '%s'\n" % safe)
 
         shard_output = work_dir / ("part_%02d.mp4" % index)
         motion = (
