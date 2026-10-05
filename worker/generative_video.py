@@ -68,6 +68,8 @@ def _run_blender(story_file,output_file):
 
         frames = sorted(shard_frames.glob("scene_*.jpg"))
         if len(frames) != len(shard_scenes):
+            frames = sorted(shard_frames.glob("*.jpg"))
+        if len(frames) != len(shard_scenes):
             logger.error(
                 "Blender shard %s produced %s keyframes for %s scenes",
                 index, len(frames), len(shard_scenes)
@@ -381,8 +383,13 @@ def _blender_render():
                 if obj.name.startswith("Story"):
                     bpy.data.objects.remove(obj, do_unlink=True)
             compose_scene(sc, scene_index)
-            scene.render.filepath = str(output.parent / ("scene_%04d.jpg" % scene_index))
+            frame_path = output.parent / ("scene_%04d.jpg" % scene_index)
+            scene.render.filepath = str(frame_path)
             bpy.ops.render.render(write_still=True)
+            if not frame_path.exists():
+                candidates = sorted(output.parent.glob("scene_%04d*" % scene_index))
+                if candidates:
+                    candidates[0].rename(frame_path)
         print("CINEMATIC_KEYFRAMES_DONE", len(scenes), flush=True)
     else:
         scene.frame_set(1)
