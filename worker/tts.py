@@ -8,7 +8,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 TARGET = float(os.getenv("CINEMATIC_SCENE_SECONDS", "15.0"))
-PIPER_MODEL = os.getenv("PIPER_MODEL", "en_US-lessac-high")
+PIPER_MODEL = os.getenv("PIPER_MODEL", "en_US-lessac-high")\nVOICE_DIR = DATA_DIR / "voices"
 VOICE = os.getenv("TTS_VOICE", "en-us")
 
 
