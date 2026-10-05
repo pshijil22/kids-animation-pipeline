@@ -71,8 +71,8 @@ def _run_blender(story_file,output_file):
             frames = sorted(shard_frames.glob("*.jpg"))
         if len(frames) != len(shard_scenes):
             logger.error(
-                "Blender shard %s produced %s keyframes for %s scenes",
-                index, len(frames), len(shard_scenes)
+                "Blender shard %s produced %s keyframes for %s scenes; stdout=%s stderr=%s",
+                index, len(frames), len(shard_scenes), result.stdout[-4000:], result.stderr[-6000:]
             )
             raise RuntimeError("Blender shard %s did not produce all scene keyframes" % index)
 
@@ -384,12 +384,17 @@ def _blender_render():
                     bpy.data.objects.remove(obj, do_unlink=True)
             compose_scene(sc, scene_index)
             frame_path = output.parent / ("scene_%04d.jpg" % scene_index)
-            scene.render.filepath = str(frame_path.with_suffix(""))
-            bpy.ops.render.render(write_still=True)
+            # Render to Blender's Render Result, then save directly to the exact
+            # filename. This avoids Blender's command-line output-path extension
+            # normalization, which can silently leave us with no .jpg files.
+            scene.render.filepath = str(frame_path)
+            bpy.ops.render.render()
+            render_result = bpy.data.images.get("Render Result")
+            if render_result is None:
+                raise RuntimeError("Blender produced no Render Result for scene %s" % scene_index)
+            render_result.save_render(filepath=str(frame_path), scene=scene)
             if not frame_path.exists():
-                candidates = sorted(output.parent.glob("scene_%04d*" % scene_index))
-                if candidates:
-                    candidates[0].rename(frame_path)
+                raise RuntimeError("Blender could not save keyframe %s" % frame_path)
         print("CINEMATIC_KEYFRAMES_DONE", len(scenes), flush=True)
     else:
         scene.frame_set(1)
