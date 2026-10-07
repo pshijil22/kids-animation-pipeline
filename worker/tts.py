@@ -7,7 +7,7 @@ from pathlib import Path
 DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
 AUDIO_DIR = DATA_DIR / "audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-TARGET = float(os.getenv("CINEMATIC_SCENE_SECONDS", "15.0"))
+TARGET = float(os.getenv("CINEMATIC_SCENE_SECONDS", "5.0"))
 PIPER_MODEL = os.getenv("PIPER_MODEL", "en_US-lessac-high")
 VOICE_DIR = DATA_DIR / "voices"
 VOICE = os.getenv("TTS_VOICE", "en-us")
@@ -96,6 +96,11 @@ async def generate_narration_from_story(story, job_id):
     total = 0.0
     for i, sc in enumerate(story.get("scenes", []), 1):
         text = (sc.get("narration") or "").strip() or "Let's see what happens next."
+        dialogue = sc.get("dialogue") or []
+        if isinstance(dialogue, list):
+            lines = [str(x.get("text", "")).strip() for x in dialogue if isinstance(x, dict) and x.get("text")]
+            if lines:
+                text = text + " " + " ".join(lines)
         wav = AUDIO_DIR / (f"{job_id}_scene_{i:03d}.wav")
         _speak(text, wav)
         spoken = _duration(str(wav))
@@ -144,7 +149,7 @@ async def generate_narration_from_story(story, job_id):
         out.replace(wav)
         files.append(str(wav))
         entries.append(
-            (i, total, min(spoken, TARGET), sc.get("title", f"Scene {i}"), text[:220])
+            (i, total, min(spoken, TARGET), sc.get("title", f"Scene {i}"), text[:420])
         )
         total += TARGET
 
