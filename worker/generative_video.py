@@ -1,406 +1,119 @@
-"""Shot-based cinematic Blender renderer with original procedural 3D puppets."""
-import json
-import logging
-import math
-import os
-import shutil
-import subprocess
-import sys
+"""Real animated cinematic renderer for the quality gate."""
+import json, logging, math, os, shutil, subprocess, sys
 from pathlib import Path
 
-logger=logging.getLogger(__name__)
-DATA_DIR=Path(os.getenv("DATA_DIR","./data"))
-VIDEOS_DIR=DATA_DIR/"videos"
-SHOTS_DIR=DATA_DIR/"generated_shots"
-PREVIEW=os.getenv("CINEMATIC_PREVIEW","true").lower()=="true"
-FPS=int(os.getenv("BLENDER_RENDER_FPS","2"))
-WIDTH=int(os.getenv("BLENDER_RENDER_WIDTH","640"))
-HEIGHT=int(os.getenv("BLENDER_RENDER_HEIGHT","360"))
-SCENE_SECONDS=float(os.getenv("CINEMATIC_SCENE_SECONDS","15"))
-MIN_SECONDS=80 if PREVIEW else 1140
-MAX_SECONDS=110 if PREVIEW else 1260
+log=logging.getLogger(__name__)
+DATA=Path(os.getenv("DATA_DIR","./data")); VIDEOS=DATA/"videos"; SHOTS=DATA/"generated_shots"
+FPS=int(os.getenv("BLENDER_RENDER_FPS","12")); WIDTH=int(os.getenv("BLENDER_RENDER_WIDTH","960")); HEIGHT=int(os.getenv("BLENDER_RENDER_HEIGHT","540"))
+MIN_SECONDS=float(os.getenv("QUALITY_MIN_SECONDS","29")); MAX_SECONDS=float(os.getenv("QUALITY_MAX_SECONDS","31"))
 
-def _run_blender(story_file,output_file):
-    """Render one cinematic keyframe per scene, then create motion in FFmpeg.
+def _run_blender(story_file, output):
+    blender=shutil.which("blender")
+    if not blender: raise RuntimeError("Blender is required")
+    cmd=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--cinematic-render","--story",str(Path(story_file).resolve()),"--output",str(Path(output).resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
+    p=subprocess.run(cmd,capture_output=True,text=True,timeout=1200)
+    if p.returncode:
+        log.error(p.stdout[-5000:]); log.error(p.stderr[-7000:]); raise RuntimeError("Blender cinematic render failed")
+    if not output.exists() or output.stat().st_size<100000: raise RuntimeError("No usable animated render produced")
 
-    GitHub-hosted CPU runners are not suitable for rendering thousands of
-    Blender frames for a 20-minute episode. Blender therefore creates the
-    detailed 3D composition and character pose once per scene; FFmpeg turns
-    those keyframes into smooth 30fps camera-motion clips.
-    """
-    blender, ffmpeg = shutil.which("blender"), shutil.which("ffmpeg")
-    if not blender or not ffmpeg:
-        raise RuntimeError("Blender and FFmpeg must be installed.")
-    story = json.loads(Path(story_file).read_text(encoding="utf-8"))
-    scenes = story.get("scenes", [])
-    requested = int(os.getenv("BLENDER_SHARDS", "8"))
-    shard_count = max(1, min(requested, len(scenes) or 1))
-    shard_size = math.ceil(len(scenes) / shard_count)
-    work_dir = output_file.with_name(output_file.stem + "_shards")
-    work_dir.mkdir(parents=True, exist_ok=True)
+def _sub_filter(srt):
+    p=str(Path(srt).resolve()).replace("\\","/").replace(":","\\:")
+    return "subtitles='%s':force_style='FontName=DejaVu Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H001B1630,BorderStyle=3,Outline=2,Shadow=1,MarginV=38'"%p
 
-    def render_one(index):
-        first = index * shard_size
-        shard_scenes = scenes[first:first + shard_size]
-        shard_story = dict(story)
-        shard_story["scenes"] = shard_scenes
-        shard_story_file = work_dir / ("story_%02d.json" % index)
-        shard_frames = work_dir / ("frames_%02d" % index)
-        shard_frames.mkdir(parents=True, exist_ok=True)
-        shard_story_file.write_text(
-            json.dumps(shard_story, ensure_ascii=False), encoding="utf-8"
-        )
-        command = [
-            blender, "--background", "--enable-autoexec", "--python",
-            str(Path(__file__).resolve()), "--",
-            "--free-blender-render", "--single-frame-scenes",
-            "--story", str(shard_story_file.resolve()),
-            "--output", str((shard_frames / "scene_####").resolve()),
-            "--fps", str(FPS), "--width", str(WIDTH), "--height", str(HEIGHT),
-        ]
-        result = subprocess.run(
-            command, capture_output=True, text=True, timeout=30 * 60
-        )
-        if result.returncode:
-            logger.error("Blender shard %s stdout: %s", index, result.stdout[-5000:])
-            logger.error("Blender shard %s stderr: %s", index, result.stderr[-7000:])
-            raise RuntimeError("Blender shard %s failed" % index)
-
-        frames = sorted(shard_frames.glob("scene_*.jpg"))
-        if len(frames) != len(shard_scenes):
-            frames = sorted(shard_frames.glob("*.jpg"))
-        if len(frames) != len(shard_scenes):
-            logger.error(
-                "Blender shard %s produced %s keyframes for %s scenes; stdout=%s stderr=%s",
-                index, len(frames), len(shard_scenes), result.stdout[-4000:], result.stderr[-6000:]
-            )
-            raise RuntimeError("Blender shard %s did not produce all scene keyframes" % index)
-
-        concat_file = work_dir / ("images_%02d.txt" % index)
-        with concat_file.open("w", encoding="utf-8") as f:
-            for frame_path in frames:
-                safe = frame_path.resolve().as_posix().replace("'", "'\\''")
-                f.write("file '%s'\n" % safe)
-                f.write("duration %.3f\n" % SCENE_SECONDS)
-            safe = frames[-1].resolve().as_posix().replace("'", "'\\''")
-            f.write("file '%s'\n" % safe)
-
-        shard_output = work_dir / ("part_%02d.mp4" % index)
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0012,1.10)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)':"
-            "d=450:s=%sx%s:fps=30,"
-            "format=yuv420p"
-        ) % (WIDTH, HEIGHT)
-        encode = [
-            ffmpeg, "-y", "-loglevel", "warning",
-            "-f", "concat", "-safe", "0", "-i", str(concat_file),
-            "-vf", motion,
-            "-c:v", "libx264", "-preset", os.getenv("VIDEO_PRESET", "veryfast"),
-            "-b:v", os.getenv("VIDEO_BITRATE", "1400k"),
-            "-maxrate", os.getenv("VIDEO_MAXRATE", "1600k"),
-            "-bufsize", os.getenv("VIDEO_BUFSIZE", "3200k"),
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-            str(shard_output),
-        ]
-        encoded = subprocess.run(
-            encode, capture_output=True, text=True, timeout=30 * 60
-        )
-        if encoded.returncode or not shard_output.exists():
-            logger.error("FFmpeg shard %s stderr: %s", index, encoded.stderr[-6000:])
-            raise RuntimeError("FFmpeg shard %s failed" % index)
-        shutil.rmtree(shard_frames, ignore_errors=True)
-        concat_file.unlink(missing_ok=True)
-        return shard_output
-
-    from concurrent.futures import ThreadPoolExecutor
-    logger.info(
-        "Rendering %s scenes as %s keyframe shards at %sx%s",
-        len(scenes), shard_count, WIDTH, HEIGHT
-    )
-    with ThreadPoolExecutor(max_workers=shard_count) as pool:
-        parts = list(pool.map(render_one, range(shard_count)))
-
-    concat_file = work_dir / "concat.txt"
-    concat_file.write_text(
-        "".join(
-            "file '%s'\n" % p.resolve().as_posix().replace("'", "'\\''")
-            for p in parts
-        ),
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        [
-            ffmpeg, "-y", "-loglevel", "warning", "-f", "concat", "-safe", "0",
-            "-i", str(concat_file), "-c", "copy", "-movflags", "+faststart",
-            str(output_file)
-        ],
-        capture_output=True, text=True, timeout=30 * 60,
-    )
-    if result.returncode or not output_file.exists():
-        logger.error("FFmpeg concat stderr: %s", result.stderr[-6000:])
-        raise RuntimeError("FFmpeg could not stitch the cinematic shards")
-    shutil.rmtree(work_dir, ignore_errors=True)
-
-def _concat_audio_video(video,narration,subtitles,output):
-    sub=str(subtitles.resolve()).replace(chr(92),"/").replace(":","\:")
-    filt=("subtitles='"+sub+"':force_style='FontName=DejaVu Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H001B1630,BorderStyle=3,Outline=2,Shadow=1,MarginV=34'")
-    cmd=["ffmpeg","-y","-loglevel","warning","-i",str(video),"-i",str(narration),"-filter_complex","[0:v]fps=30,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0,"+filt+"[v]","-map","[v]","-map","1:a:0","-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","slow"),"-b:v",os.getenv("VIDEO_BITRATE","1400k"),"-maxrate",os.getenv("VIDEO_MAXRATE","1600k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","3200k"),"-c:a","aac","-b:a","96k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(output)]
-    result=subprocess.run(cmd,capture_output=True,text=True,timeout=7200)
-    if result.returncode: logger.error(result.stderr[-5000:]); raise RuntimeError("Final movie assembly failed")
+def _assemble(video,audio,srt,out,story):
+    ff=shutil.which("ffmpeg"); title=str(story.get("title","Little Wonder Trails")).replace("'","\\'")
+    vf="fps=30,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0,"+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
+    cmd=[ff,"-y","-loglevel","warning","-i",str(video),"-i",str(audio),"-filter_complex","[0:v]"+vf+"[v]","-map","[v]","-map","1:a:0","-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","veryfast"),"-b:v",os.getenv("VIDEO_BITRATE","3500k"),"-maxrate",os.getenv("VIDEO_MAXRATE","4200k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","8400k"),"-c:a","aac","-b:a","160k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(out)]
+    p=subprocess.run(cmd,capture_output=True,text=True,timeout=600)
+    if p.returncode: log.error(p.stderr[-5000:]); raise RuntimeError("Final cinematic assembly failed")
 
 async def generate_scenes(story,job_id):
-    SHOTS_DIR.mkdir(parents=True,exist_ok=True); VIDEOS_DIR.mkdir(parents=True,exist_ok=True)
-    scenes=story.get("scenes",[]); expected=6 if PREVIEW else int(os.getenv("TOTAL_SCENES","80"))
+    SHOTS.mkdir(parents=True,exist_ok=True); VIDEOS.mkdir(parents=True,exist_ok=True)
+    scenes=story.get("scenes",[]); expected=int(os.getenv("TOTAL_SCENES","6"))
     if len(scenes)!=expected: raise ValueError("Expected %s scenes, received %s"%(expected,len(scenes)))
-    story_file=SHOTS_DIR/("%s_story.json"%job_id); silent=VIDEOS_DIR/("%s_cinematic.mp4"%job_id)
-    story_file.write_text(json.dumps(story,ensure_ascii=False),encoding="utf-8")
-    logger.info("Rendering %s scenes as three cinematic shots each at %sx%s/%sfps",len(scenes),WIDTH,HEIGHT,FPS)
-    _run_blender(story_file,silent)
-    if not silent.exists() or silent.stat().st_size<100000: raise RuntimeError("No usable cinematic movie was produced")
-    return {"clips":[silent],"scene_images":[]}
+    sf=SHOTS/(job_id+"_story.json"); raw=VIDEOS/(job_id+"_blender.mp4")
+    sf.write_text(json.dumps(story,ensure_ascii=False),encoding="utf-8")
+    log.info("Rendering %s REAL animated shots at %sx%s/%sfps",len(scenes),WIDTH,HEIGHT,FPS)
+    _run_blender(sf,raw)
+    return {"clips":[raw],"scene_images":[]}
 
 async def create_animated_video(story,audio_data,scene_data,job_id):
-    clips=[Path(x) for x in scene_data.get("clips",[])]
-    if not clips: raise ValueError("No cinematic render was produced")
-    output=VIDEOS_DIR/("%s.mp4"%job_id)
-    _concat_audio_video(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),output)
-    duration=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(output)],text=True).strip())
-    if not MIN_SECONDS<=duration<=MAX_SECONDS: raise RuntimeError("Generated movie duration %.1fs outside %s-%ss"%(duration,MIN_SECONDS,MAX_SECONDS))
-    size=output.stat().st_size
-    if size<100000: raise RuntimeError("Video output is suspiciously small")
-    return {"video_file":str(output),"title":story["title"],"description":story["description"],"size_bytes":size,"duration_seconds":duration,"job_id":job_id,"resolution":"1920x1080","fps":30}
+    clips=[Path(x) for x in scene_data["clips"]]; out=VIDEOS/(job_id+".mp4")
+    _assemble(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),out,story)
+    d=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(out)],text=True).strip())
+    if not MIN_SECONDS<=d<=MAX_SECONDS: raise RuntimeError("Quality gate duration %.2fs outside %.2f-%.2fs"%(d,MIN_SECONDS,MAX_SECONDS))
+    return {"video_file":str(out),"title":story["title"],"description":story.get("description",""),"size_bytes":out.stat().st_size,"duration_seconds":d,"job_id":job_id,"resolution":"1920x1080","fps":30}
 
-def _arg(name,default=None):
-    return sys.argv[sys.argv.index(name)+1] if name in sys.argv else default
+def _arg(n,d=None): return sys.argv[sys.argv.index(n)+1] if n in sys.argv else d
 
 def _blender_render():
     import bpy
     from mathutils import Vector
-    story=json.loads(Path(_arg("--story")).read_text(encoding="utf-8")); output=Path(_arg("--output"))
-    fps=int(_arg("--fps",str(FPS))); width=int(_arg("--width",str(WIDTH))); height=int(_arg("--height",str(HEIGHT)))
-    scenes=story["scenes"]; total_frames=int(sum(float(x.get("duration_seconds",SCENE_SECONDS)) for x in scenes)*fps)
+    story=json.loads(Path(_arg("--story")).read_text(encoding="utf-8")); out=Path(_arg("--output"))
+    fps=int(_arg("--fps",str(FPS))); w=int(_arg("--width",str(WIDTH))); h=int(_arg("--height",str(HEIGHT)))
+    scenes=story["scenes"]
 
-    def mat(name,color,rough=.55):
-        m=bpy.data.materials.get(name) or bpy.data.materials.new(name); m.use_nodes=True
-        b=m.node_tree.nodes.get("Principled BSDF"); b.inputs["Base Color"].default_value=(*color,1); b.inputs["Roughness"].default_value=rough
-        if "Specular IOR Level" in b.inputs: b.inputs["Specular IOR Level"].default_value=.35
+    def mat(name,c,rough=.6,emit=0):
+        m=bpy.data.materials.new(name); m.use_nodes=True; b=m.node_tree.nodes["Principled BSDF"]; b.inputs["Base Color"].default_value=(*c,1); b.inputs["Roughness"].default_value=rough
+        if emit: b.inputs["Emission Color"].default_value=(*c,1); b.inputs["Emission Strength"].default_value=emit
         return m
-    def sphere(name,loc,scale,material):
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=16,ring_count=10,location=loc); o=bpy.context.object; o.name=name; o.scale=scale; o.data.materials.append(material)
-        for p in o.data.polygons: p.use_smooth=True
+    def sph(name,loc,scale,m,seg=24):
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=seg,ring_count=16,location=loc); o=bpy.context.object; o.name=name; o.scale=scale; o.data.materials.append(m)
+        for p in o.data.polygons:p.use_smooth=True
         return o
-    def curve(name,points,bevel,material):
-        c=bpy.data.curves.new(name,"CURVE"); c.dimensions="3D"; c.bevel_depth=bevel; c.bevel_resolution=3
-        s=c.splines.new("BEZIER"); s.bezier_points.add(len(points)-1)
-        for p,co in zip(s.bezier_points,points): p.co=co; p.handle_left_type="AUTO"; p.handle_right_type="AUTO"
-        o=bpy.data.objects.new(name,c); bpy.context.collection.objects.link(o); o.data.materials.append(material); return o
-    def key(o,frame,loc=None,rot=None,scale=None):
-        if loc is not None: o.location=loc; o.keyframe_insert("location",frame=frame)
-        if rot is not None: o.rotation_euler=rot; o.keyframe_insert("rotation_euler",frame=frame)
-        if scale is not None: o.scale=scale; o.keyframe_insert("scale",frame=frame)
-    def aim(o,target,frame):
-        o.rotation_euler=(Vector(target)-o.location).to_track_quat("-Z","Y").to_euler(); o.keyframe_insert("rotation_euler",frame=frame)
+    def key(o,f,loc=None,rot=None):
+        if loc is not None:o.location=loc;o.keyframe_insert("location",frame=f)
+        if rot is not None:o.rotation_euler=rot;o.keyframe_insert("rotation_euler",frame=f)
+    def aim(o,target,f):o.rotation_euler=(Vector(target)-o.location).to_track_quat("-Z","Y").to_euler();o.keyframe_insert("rotation_euler",frame=f)
 
-    bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete(use_global=False)
-    scene=bpy.context.scene; engines={x.identifier for x in scene.render.bl_rna.properties["engine"].enum_items}
-    scene.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE"
-    scene.render.resolution_x,scene.render.resolution_y=width,height; scene.render.resolution_percentage=100; scene.render.fps=fps
-    scene.render.image_settings.file_format="JPEG"; scene.render.image_settings.color_mode="RGB"; scene.render.image_settings.quality=92; scene.render.use_file_extension=True; scene.render.filepath=str(output); scene.render.use_file_extension=True
-    scene.frame_start, scene.frame_end = 1, total_frames
-    try:
-        scene.view_settings.look = "AgX - Medium High Contrast"
-    except Exception:
-        pass
-    world = bpy.data.worlds.new("CinematicWorld") if not bpy.data.worlds else bpy.data.worlds[0]
-    scene.world = world
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    bg.inputs["Strength"].default_value = .32
+    bpy.ops.object.select_all(action="SELECT");bpy.ops.object.delete(use_global=False)
+    sc=bpy.context.scene; engines={x.identifier for x in sc.render.bl_rna.properties["engine"].enum_items};sc.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE";sc.render.resolution_x=w;sc.render.resolution_y=h;sc.render.resolution_percentage=100;sc.render.fps=fps
+    sc.render.image_settings.file_format="FFMPEG";sc.render.ffmpeg.format="MPEG4";sc.render.ffmpeg.codec="H264";sc.render.ffmpeg.constant_rate_factor="MEDIUM";sc.render.filepath=str(out)
+    try:sc.view_settings.look="AgX - Medium High Contrast"
+    except Exception:pass
+    world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(.035,.055,.09,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=.35
 
-    ground = mat("Ground", (.18, .32, .15), .82)
-    sand = mat("Sand", (.72, .56, .34), .9)
-    water = mat("Water", (.06, .30, .48), .2)
-    leaf = mat("Leaves", (.10, .40, .16), .72)
-    wood = mat("Wood", (.24, .11, .05), .88)
-    rock = mat("Rock", (.30, .32, .34), .92)
-    white = mat("Foam", (.93, .96, .94), .4)
-    eye = mat("Eye", (.97, .98, .94), .2)
-    pupil = mat("Pupil", (.01, .008, .012), .15)
-    mouth = mat("Mouth", (.16, .02, .018), .35)
-    sphere("Ground", (0, 2, -.85), (18, 16, .65), ground)
-    sphere("Sand", (0, -5, -.48), (17, 8, .32), sand)
-    sphere("Water", (0, -12, -.22), (17, 7, .12), water)
-    for x, y, s in [(-8,4,1.6),(-5,7,1),(7,5,1.4),(9,1,1.1),(-10,-1,.9),(6,-3,.8)]:
-        sphere("Trunk", (x,y,1*s), (.14*s,.14*s,1*s), wood)
-        sphere("Canopy", (x,y,2.2*s), (1.1*s,.9*s,1.2*s), leaf)
-    for x, y, s in [(-5,1,1),(4,3,.8),(8,-2,1.1),(-8,-3,.65)]:
-        sphere("Rock", (x,y,.02), (s,s*.7,s*.4), rock)
-    for y in (-7,-8.2,-9.4):
-        curve("Wave", [(-14,y,0),(-7,y+.35,.08),(0,y,.02),(7,y-.3,.08),(14,y,0)], .045, white)
+    grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5)
+    sph("Ground",(0,2,-.7),(18,14,.55),grass)
+    for x,y,s in [(-8,5,1.7),(-5,8,1.2),(7,6,1.6),(10,1,1.1),(-9,-1,1),(6,-4,1)]:
+        sph("Trunk",(x,y,1.1*s),(.32*s,.32*s,1.5*s),wood);sph("Canopy",(x,y,2.8*s),(1.7*s,1.5*s,1.8*s),grass)
 
-    def prop_for(text):
-        t = (text or "").lower()
-        choices = [
-            (("box","chest","treasure"),"box"), (("key",),"key"),
-            (("map","paper","letter"),"map"), (("book","storybook"),"book"),
-            (("ball","toy"),"ball"), (("flower","rose","plant"),"flower"),
-            (("shell",),"shell"), (("lantern","lamp"),"lantern"),
-            (("boat","ship"),"boat"), (("kite",),"kite"),
-            (("apple","fruit"),"apple"), (("cookie","cake"),"cookie"),
-            (("backpack","bag"),"backpack"), (("bridge",),"bridge"),
-            (("star","moon"),"star"), (("stick","branch"),"stick"),
-            (("stone","rock","pebble"),"stone")
-        ]
-        for words, kind in choices:
-            if any(w in t for w in words):
-                return kind
-        return None
-
-    def make_prop(kind):
-        if not kind:
-            return None
-        if kind == "box": return sphere("StoryBox",(0,0,.65),(.62,.52,.45),wood)
-        if kind == "key": return curve("StoryKey",[(-.45,0,.65),(.2,0,.65),(.35,0,.82)],.07,rock)
-        if kind == "map": return sphere("StoryMap",(0,0,.5),(.7,.08,.5),sand)
-        if kind == "book": return sphere("StoryBook",(0,0,.55),(.55,.32,.12),wood)
-        if kind in ("ball","apple","cookie","stone","shell"):
-            return sphere("StoryObject",(0,0,.6),(.38,.38,.38),rock if kind=="stone" else sand)
-        if kind == "flower": return curve("StoryFlower",[(0,0,.2),(0,0,.8),(0,0,1.2)],.035,leaf)
-        if kind == "lantern": return sphere("StoryLantern",(0,0,.8),(.3,.3,.5),sand)
-        if kind == "boat": return sphere("StoryBoat",(0,-1,.2),(1.2,.45,.25),water)
-        if kind == "kite": return curve("StoryKite",[(0,0,1),(0,0,2)],.025,rock)
-        if kind == "backpack": return sphere("StoryBag",(0,.35,1),(.55,.25,.65),water)
-        if kind == "bridge": return curve("StoryBridge",[(-2,0,.3),(0,0,.7),(2,0,.3)],.22,wood)
-        if kind == "star": return sphere("StoryStar",(0,0,1.3),(.25,.25,.25),sand)
-        if kind == "stick": return curve("StoryStick",[(-.5,0,.5),(.5,0,.8)],.08,wood)
-        return None
-
-    def light(name, energy, size, loc, color):
-        d = bpy.data.lights.new(name, "AREA")
-        d.energy, d.shape, d.size, d.color = energy, "DISK", size, color
-        o = bpy.data.objects.new(name, d); bpy.context.collection.objects.link(o); o.location = loc
-        return o
-    light("Key",850,6,(-5,-4,10),(1,.72,.50))
-    light("Fill",520,8,(6,-1,6),(.48,.68,1))
-    light("Rim",700,5,(0,7,7),(1,.55,.30))
-
-    cd = bpy.data.cameras.new("Camera")
-    camera = bpy.data.objects.new("Camera", cd)
-    bpy.context.collection.objects.link(camera)
-    scene.camera = camera
-    cd.lens = 50
-    cd.dof.use_dof = True
-    cd.dof.aperture_fstop = 2.4
-    focus = bpy.data.objects.new("Focus", None)
-    bpy.context.collection.objects.link(focus)
-    cd.dof.focus_object = focus
-
-    palettes = [(.88,.32,.16),(.18,.48,.78),(.62,.24,.66)]
-    heroes = []
-    characters = story.get("characters", [])
-    if isinstance(characters, dict):
-        characters = list(characters.values())
-    elif not isinstance(characters, list):
-        characters = []
-    for idx, _unused in enumerate(characters[:3]):
-        bm = mat("Hero%d" % idx, palettes[idx % 3], .48)
-        root = bpy.data.objects.new("HeroRoot%d" % idx, None)
-        bpy.context.collection.objects.link(root)
-        body = sphere("Body%d" % idx,(0,0,1.15),(.78,.58,.92),bm)
-        head = sphere("Head%d" % idx,(0,-.02,2.15),(.72,.65,.68),bm)
-        body.parent = root; head.parent = root
-        arms=[]; legs=[]; pupils=[]; brows=[]
+    def hero(spec,i):
+        sp=spec.get("species","").lower();fur,acc=(cream,teal) if "bunny" in sp or "rabbit" in sp else (honey,yellow) if "bear" in sp else (orange,purple)
+        root=bpy.data.objects.new("Hero%d"%i,None);bpy.context.collection.objects.link(root)
+        body=sph("Body%d"%i,(0,0,1.15),(.72,.58,.95),fur);head=sph("Head%d"%i,(0,0,2.12),(.72,.67,.68),fur);body.parent=root;head.parent=root
         for side in (-1,1):
-            e=sphere("Eye",(side*.25,-.59,2.25),(.15,.08,.18),eye); e.parent=root
-            p=sphere("Pupil",(side*.25,-.665,2.25),(.065,.025,.09),pupil); p.parent=root
-            b=curve("Brow",[(side*.39,-.64,2.49),(side*.15,-.68,2.54)],.025,pupil); b.parent=root
-            a=sphere("Arm",(side*.78,-.02,1.35),(.18,.18,.62),bm); a.parent=root; arms.append(a)
-            l=sphere("Leg",(side*.34,.02,.47),(.20,.20,.58),bm); l.parent=root; legs.append(l)
-            ear=sphere("Ear",(side*.42,.02,2.70),(.24,.18,.48),bm); ear.parent=root
-            pupils.append(p); brows.append(b)
-        m=curve("Mouth",[(-.18,-.66,1.95),(0,-.70,1.90),(.18,-.66,1.95)],.035,mouth); m.parent=root
-        tail=curve("Tail",[(0,.45,1.35),(.45,.72,1.48),(.82,.70,1.85)],.13,bm); tail.parent=root
-        heroes.append({"root":root,"body":body,"arms":arms,"legs":legs,"pupils":pupils,"brows":brows,"mouth":m,"tail":tail})
-
-    def pose(h, action, emotion, frame_no, lane):
-        text = (action or "").lower()
-        moving = any(w in text for w in ("run","walk","chase","follow","move","rush","approach"))
-        jumping = any(w in text for w in ("jump","leap","hop"))
-        x = -1 + lane * 1.05 + (1.2 if moving else 0)
-        z = .35 if jumping else 0
-        key(h["root"], frame_no, (x, 0, z), (0, 0, math.radians(-6 if moving else 0)))
-        for j, l in enumerate(h["legs"]):
-            key(l, frame_no, rot=(0, math.radians(18 if moving and j == 0 else -12 if moving else 0), 0))
-        for j, aobj in enumerate(h["arms"]):
-            angle = -32 if "wave" in text and j == 0 else 18
-            if any(w in text for w in ("reach","grab","pick")):
-                angle = -34
-            key(aobj, frame_no, rot=(0, math.radians(angle), 0))
-        e=(emotion or "").lower()
-        worried=any(w in e for w in ("worried","sad","scared","nervous"))
-        smile=any(w in e for w in ("happy","joy","excited","proud","brave"))
-        for b in h["brows"]:
-            key(b, frame_no, rot=(0,0,math.radians(-12 if worried else 5 if smile else 0)))
-
-    def compose_scene(sc, scene_no):
-        frame_no = 1
-        beats = sc.get("visual_beats") or []
-        if len(beats) < 3:
-            beats = beats + [{}] * (3 - len(beats))
-        beat = beats[1] if len(beats) > 1 else beats[0]
-        action = str(beat.get("action") or sc.get("action") or "")
-        subject = str(beat.get("subject") or sc.get("character_actions") or "")
-        emotion = str(sc.get("emotion") or "curious")
-        for idx, h in enumerate(heroes):
-            pose(h, action + " " + subject, emotion, frame_no, idx)
-        prop = prop_for(str(beat.get("prop") or sc.get("props") or ""))
-        obj = make_prop(prop)
-        if obj:
-            obj.location = (.25, -.4, .9)
-            obj.rotation_euler = (0, 0, math.radians(8 if scene_no % 2 else -8))
-        style = str(beat.get("camera") or sc.get("camera") or "").lower()
-        if "close" in style:
-            camera.location = (.2,-5.5,2.8); cd.lens = 78
-        elif "wide" in style:
-            camera.location = (0,-12,5.8); cd.lens = 32
-        elif "low" in style:
-            camera.location = (-3.5,-7,1.7); cd.lens = 48
+            e=sph("Eye",(side*.25,-.62,2.22),(.13,.08,.16),white);p=sph("Pupil",(side*.25,-.69,2.22),(.055,.025,.075),black);e.parent=root;p.parent=root
+            a=sph("Arm",(side*.72,0,1.32),(.16,.16,.55),fur);a.parent=root
+            l=sph("Leg",(side*.3,0,.43),(.2,.2,.48),fur);l.parent=root
+        if "bunny" in sp or "rabbit" in sp:
+            for side in (-1,1):sph("Ear",(side*.38,0,2.82),(.18,.16,.62),fur).parent=root
+        elif "fox" in sp:
+            sph("Tail",(0,.58,1.35),(.25,.65,.42),fur).parent=root;sph("TailTip",(0,.95,1.5),(.27,.28,.27),white).parent=root
         else:
-            camera.location = (0,-8.5,3.7); cd.lens = 52
-        target = (.2,-.4,1.7)
-        aim(camera, target, frame_no)
-        focus.location = target
-        scene.frame_set(frame_no)
+            sph("Ear",(-.42,0,2.62),(.23,.18,.24),fur).parent=root;sph("Ear",(.42,0,2.62),(.23,.18,.24),fur).parent=root
+        sph("Accessory",(0,-.60,1.55),(.42,.10,.18),acc).parent=root
+        return root
 
-    single = "--single-frame-scenes" in sys.argv
-    if single:
-        for scene_index, sc in enumerate(scenes, 1):
-            # Remove scene-specific props from the previous composition.
-            for obj in list(bpy.data.objects):
-                if obj.name.startswith("Story"):
-                    bpy.data.objects.remove(obj, do_unlink=True)
-            compose_scene(sc, scene_index)
-            frame_path = output.parent / ("scene_%04d.jpg" % scene_index)
-            # Render to Blender's Render Result, then save directly to the exact
-            # filename. This avoids Blender's command-line output-path extension
-            # normalization, which can silently leave us with no .jpg files.
-            scene.render.filepath = str(frame_path)
-            bpy.ops.render.render()
-            render_result = bpy.data.images.get("Render Result")
-            if render_result is None:
-                raise RuntimeError("Blender produced no Render Result for scene %s" % scene_index)
-            render_result.save_render(filepath=str(frame_path), scene=scene)
-            if not frame_path.exists():
-                raise RuntimeError("Blender could not save keyframe %s" % frame_path)
-        print("CINEMATIC_KEYFRAMES_DONE", len(scenes), flush=True)
-    else:
-        scene.frame_set(1)
-        bpy.ops.wm.save_as_mainfile(filepath=str(output.parent / "scene.blend"))
-        bpy.ops.render.render(animation=True)
-        print("CINEMATIC_RENDER_RESULT", "FINISHED", flush=True)
+    cast=story.get("characters",[]);cast=list(cast.values()) if isinstance(cast,dict) else cast;heroes=[hero(c,i) for i,c in enumerate(cast[:3])]
+    cd=bpy.data.cameras.new("Camera");cam=bpy.data.objects.new("Camera",cd);bpy.context.collection.objects.link(cam);sc.camera=cam;cd.dof.use_dof=True;cd.dof.aperture_fstop=2.2
+    focus=bpy.data.objects.new("Focus",None);bpy.context.collection.objects.link(focus);cd.dof.focus_object=focus
+    for name,energy,size,loc,color in [("Key",1100,7,(-5,-5,9),(1,.72,.48)),("Fill",500,9,(6,-1,6),(.45,.62,1)),("Rim",800,5,(0,7,7),(1,.42,.2))]:
+        d=bpy.data.lights.new(name,"AREA");d.energy=energy;d.shape="DISK";d.size=size;d.color=color;o=bpy.data.objects.new(name,d);bpy.context.collection.objects.link(o);o.location=loc
 
-if __name__ == "__main__" and "--free-blender-render" in sys.argv:
-    _blender_render()
+    cursor=1
+    for si,s in enumerate(scenes):
+        frames=max(1,round(float(s.get("duration_seconds",5))*fps));start,end=cursor,cursor+frames-1;beats=(s.get("visual_beats") or [{},{},{}])[:3]
+        for bi,b in enumerate(beats):
+            f=start+round((end-start)*(bi/2));act=str(b.get("action","")).lower();camt=str(b.get("camera","")).lower()
+            for i,r in enumerate(heroes):
+                x=(i-1)*1.8 + (.8*bi if any(k in act for k in ("run","rush","follow")) else 0);z=.3 if "jump" in act and bi==1 else 0;key(r,f,(x,0,z),(0,0,math.radians(-5 if "turn" in act else 0)))
+            if "wide" in camt:pos,lens=(0,-13,5.8),34
+            elif "close" in camt:pos,lens=(0,-5.2,2.8),72
+            elif "low" in camt:pos,lens=(-3.5,-7,1.5),46
+            else:pos,lens=(0,-8.5,3.6),52
+            key(cam,f,pos);cd.lens=lens;aim(cam,(0,0,1.55),f);focus.location=(0,0,1.55)
+        cursor=end+1
+    sc.frame_start=1;sc.frame_end=cursor-1;bpy.ops.wm.save_as_mainfile(filepath=str(out.with_suffix(".blend")));bpy.ops.render.render(animation=True);print("CINEMATIC_ANIMATION_DONE",sc.frame_end,flush=True)
+
+if __name__=="__main__" and "--cinematic-render" in sys.argv:_blender_render()
