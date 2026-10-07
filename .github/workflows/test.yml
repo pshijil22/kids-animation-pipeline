@@ -1,4 +1,4 @@
-name: Build Kids Animation Episode
+name: Build Kids Animation Cinematic Quality Gate
 
 on:
   push:
@@ -12,7 +12,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
           cd worker
           python -m compileall -q .
           python -c "from pipeline import generate_story; print('Pipeline OK')"
-      - name: Generate full animated movie
+      - name: Build 30-second cinematic quality gate
         env:
           OLLAMA_URL: http://localhost:11434
           OLLAMA_MODEL: llama3.2:3b
@@ -57,13 +57,16 @@ jobs:
           VIDEO_MAXRATE: '1600k'
           VIDEO_BUFSIZE: '3200k'
           VIDEO_PRESET: veryfast
-          TOTAL_SCENES: '80'
-          CINEMATIC_PREVIEW: 'false'
-          CINEMATIC_SCENE_SECONDS: '15.0'
-          BLENDER_RENDER_FPS: '1'
-          BLENDER_RENDER_WIDTH: '640'
-          BLENDER_RENDER_HEIGHT: '360'
-          BLENDER_SHARDS: '8'
+          TOTAL_SCENES: '6'
+          CINEMATIC_PREVIEW: 'true'
+          CINEMATIC_SCENE_SECONDS: '5.0'
+          PIPELINE_MODE: quality_gate
+          QUALITY_MIN_SECONDS: '29'
+          QUALITY_MAX_SECONDS: '31'
+          BLENDER_RENDER_FPS: '12'
+          BLENDER_RENDER_WIDTH: '960'
+          BLENDER_RENDER_HEIGHT: '540'
+          BLENDER_SHARDS: '1'
           TTS_ENGINE: piper
           TTS_VOICE: en-us
           PIPER_MODEL: en_US-lessac-high
@@ -73,7 +76,7 @@ jobs:
         run: |
           cd worker
           python -c "import asyncio; from pipeline import generate_story; asyncio.run(generate_story())"
-      - name: Full movie quality check
+      - name: Cinematic quality check
         run: |
           file=$(find worker/data/videos -maxdepth 1 -name '*.mp4' -type f -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
           test -n "$file"
@@ -85,15 +88,15 @@ jobs:
           echo "Duration: $duration"
           echo "Resolution: $width x $height"
           echo "Audio: $audio"
-          python -c "d=float('$duration'); assert 1140 <= d <= 1260, 'Invalid movie duration: %ss' % d"
+          python -c "d=float('$duration'); assert 29 <= d <= 31, 'Invalid cinematic gate duration: %ss' % d"
           test "$width" = "1920"
           test "$height" = "1080"
           test "$audio" = "aac"
           test "$(stat -c%s "$file")" -lt 450000000
-      - name: Upload full movie artifact
+      - name: Upload cinematic quality gate
         uses: actions/upload-artifact@v4
         with:
-          name: kids-animated-episode
+          name: kids-animation-cinematic-quality-gate
           path: worker/data/videos/*.mp4
           if-no-files-found: error
           retention-days: 30
