@@ -46,7 +46,8 @@ def _download_background_reel(job_id, duration=30):
         except Exception as exc:
             log.warning("Background clip %s unavailable: %s",name,str(exc)[:180])
     if len(clips)<2:
-        raise RuntimeError("Could not download at least two story-relevant background clips; refusing to publish a green-screen video")
+        log.warning("Stock footage host blocked downloads; using the built-in animated 3D story environment")
+        return None
     normalized=[]
     for i,clip in enumerate(clips):
         dest=bgdir/("normalized_%02d.mp4"%i)
@@ -57,7 +58,8 @@ def _download_background_reel(job_id, duration=30):
             continue
         normalized.append(dest)
     if len(normalized)<2:
-        raise RuntimeError("Background footage could not be normalized; refusing to publish without moving scenery")
+        log.warning("Stock footage could not be normalized; using the built-in animated 3D story environment")
+        return None
     concat=bgdir/"concat.txt"
     concat.write_text("".join("file '%s'\n"%p.resolve().as_posix() for p in normalized),encoding="utf-8")
     reel=bgdir/"background_reel.mp4"
@@ -141,10 +143,21 @@ def _blender_render():
         sc.view_settings.view_transform="Standard"
         sc.view_settings.look="Medium High Contrast"
     except Exception:pass
-    world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(0,1,0,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=1.0
+    world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(.32,.62,.82,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=.8
 
     grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5);shadowmat=mat("Soft ground shadow",(.025,.055,.035),1)
-    # Green-screen stage: final assembly composites moving nature footage behind the cast.
+    # A colorful, self-contained storybook environment is always available offline.
+    meadow=sph("Rolling meadow",(0,3,-1.35),(18,10,2.0),grass,32)
+    sunmat=mat("Warm sun",(1,.72,.22),.4,1.2)
+    sph("Sun",(5,5,8),(1.25,1.25,1.25),sunmat,24)
+    for ti,(tx,ty,sz) in enumerate([(-7,2,1.5),(-5,4,1.1),(6,3,1.6),(8,5,1.2),(-9,7,1.0),(9,8,1.3)]):
+        sph("Tree trunk %d"%ti,(tx,ty,sz*.8),(.24,.28,sz*1.1),wood,16)
+        canopy=mat("Canopy%d"%ti,(.12+.025*(ti%3),.34+.04*(ti%2),.12),.9)
+        sph("Tree canopy %d"%ti,(tx,ty,sz*2.0),(sz*1.05,sz*.8,sz*1.05),canopy,20)
+    for fi in range(28):
+        fx=-9+(fi%14)*1.35; fy=-1+(fi//14)*1.15
+        sph("Wildflower stem %d"%fi,(fx,fy,.16),(.035,.035,.28),grass,8)
+        sph("Wildflower %d"%fi,(fx,fy,.42),(.12,.12,.10),yellow if fi%3 else purple,10)
 
     def hero(spec,i):
         sp=spec.get("species","").lower();fur,acc=(cream,teal) if "bunny" in sp or "rabbit" in sp else (honey,yellow) if "bear" in sp else (orange,purple)
