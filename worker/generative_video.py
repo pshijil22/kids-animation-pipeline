@@ -101,23 +101,70 @@ def _blender_render():
         return root
 
     cast=story.get("characters",[]);cast=list(cast.values()) if isinstance(cast,dict) else cast;heroes=[hero(c,i) for i,c in enumerate(cast[:3])]
-    cd=bpy.data.cameras.new("Camera");cam=bpy.data.objects.new("Camera",cd);bpy.context.collection.objects.link(cam);sc.camera=cam;cd.dof.use_dof=False;cd.dof.aperture_fstop=5.6
-    focus=bpy.data.objects.new("Focus",None);bpy.context.collection.objects.link(focus);cd.dof.focus_object=focus
+    # Each visual beat gets its own camera and timeline camera marker. This creates
+    # actual editorial cuts instead of one long camera move over a single composition.
+    shot_cameras=[]
     for name,energy,size,loc,color in [("Key",1100,7,(-5,-5,9),(1,.72,.48)),("Fill",500,9,(6,-1,6),(.45,.62,1)),("Rim",800,5,(0,7,7),(1,.42,.2))]:
         d=bpy.data.lights.new(name,"AREA");d.energy=energy;d.shape="DISK";d.size=size;d.color=color;o=bpy.data.objects.new(name,d);bpy.context.collection.objects.link(o);o.location=loc
 
     cursor=1
+    shot_number=0
     for si,s in enumerate(scenes):
-        frames=max(1,round(float(s.get("duration_seconds",5))*fps));start,end=cursor,cursor+frames-1;beats=(s.get("visual_beats") or [{},{},{}])[:3]
+        frames=max(1,round(float(s.get("duration_seconds",5))*fps));start,end=cursor,cursor+frames-1
+        beats=(s.get("visual_beats") or [{},{},{}])[:3]
+        # Three editorial shots per story scene: establishing/action/reaction.
         for bi,b in enumerate(beats):
-            f=start+round((end-start)*(bi/2));act=str(b.get("action","")).lower();camt=str(b.get("camera","")).lower()
+            shot_number+=1
+            f=start+round((end-start)*(bi/max(1,len(beats)-1)))
+            act=str(b.get("action","")).lower();camt=str(b.get("camera","")).lower()
+            subject=str(b.get("subject","")).lower()
             for i,r in enumerate(heroes):
-                x=(i-1)*1.8 + (.8*bi if any(k in act for k in ("run","rush","follow")) else 0);z=.3 if "jump" in act and bi==1 else 0;key(r,f,(x,0,z),(0,0,math.radians(-5 if "turn" in act else 0)))
-            if "wide" in camt:pos,lens=(0,-13,5.8),34
-            elif "close" in camt:pos,lens=(0,-5.2,2.8),72
-            elif "low" in camt:pos,lens=(-3.5,-7,1.5),46
-            else:pos,lens=(0,-8.5,3.6),52
-            key(cam,f,pos);cd.lens=lens;aim(cam,(0,0,1.55),f);focus.location=(0,0,1.55)
+                base_x=(i-1)*1.8
+                running=any(k in act for k in ("run","rush","follow","race","walk","step","glide"))
+                jumping=any(k in act for k in ("jump","pop","bounce","stretch"))
+                turning=any(k in act for k in ("look","notice","turn","reach","smile","wakes","watches"))
+                x=base_x + (0.95*bi if running and i==0 else 0)
+                z=0.38 if jumping and bi==1 and i==0 else 0
+                yaw=math.radians(-18 if turning and bi==2 and i==0 else 8 if running and i==0 else 0)
+                key(r,f,(x,0,z),(0,0,yaw))
+                # A subtle secondary head/body nod sells life even in a short shot.
+                if turning and i==0:
+                    key(r,min(end,f+max(1,frames//6)),(x,0,z+.06),(0,0,yaw+math.radians(5)))
+                    key(r,end,(x,0,z),(0,0,yaw))
+            if "wide" in camt:
+                pos,lens=(0,-14,6.2),34
+                target=(0,0,1.3)
+            elif "close" in camt or "reaction" in camt:
+                pos,lens=(-1.8,-5.0,2.7),68
+                target=(-1.8,0,2.0)
+            elif "low" in camt:
+                pos,lens=(-4.2,-7.0,1.35),42
+                target=(-1.2,0,1.25)
+            elif "tracking" in camt:
+                pos,lens=(-4.2,-8.2,3.1),48
+                target=(-1.0,0,1.4)
+            else:
+                pos,lens=(-2.0,-8.4,3.5),52
+                target=(-1.4,0,1.55)
+            # Track shots drift slightly during the shot; a marker switches to
+            # a fresh camera for the next beat, making the cut unambiguous.
+            cd=bpy.data.cameras.new("ShotCamera_%02d"%shot_number)
+            cd.lens=lens;cd.dof.use_dof=False
+            cam=bpy.data.objects.new("ShotCamera_%02d"%shot_number,cd)
+            bpy.context.collection.objects.link(cam);shot_cameras.append(cam)
+            key(cam,f,pos);aim(cam,target,f)
+            drift=min(max(1,frames//5),max(1,end-f))
+            if drift:
+                dx=.55 if any(k in camt for k in ("tracking","glide","follow")) else .12
+                key(cam,min(end,f+drift),(pos[0]+dx,pos[1]+.15,pos[2]+.05))
+                aim(cam,target,min(end,f+drift))
+            marker=sc.timeline_markers.new("SHOT_%02d_SCENE_%02d_BEAT_%02d"%(shot_number,si+1,bi+1),frame=f)
+            marker.camera=cam
+            if any(k in subject for k in ("light","glow")) or any(k in act for k in ("glow","flicker","light")):
+                # A visible floating practical light gives the discovery a story focal point.
+                orb=sph("StoryLight_%02d"%shot_number,(1.4,-.1,2.2),(.18,.18,.18),gold,16)
+                key(orb,f,(1.4,-.1,2.0))
+                key(orb,min(end,f+max(1,frames//3)),(2.0,-.1,2.5))
         cursor=end+1
     sc.frame_start=1;sc.frame_end=cursor-1;bpy.ops.wm.save_as_mainfile(filepath=str(out.with_suffix(".blend")));bpy.ops.render.render(animation=True);print("CINEMATIC_ANIMATION_DONE",sc.frame_end,flush=True)
 
