@@ -11,7 +11,7 @@ def _run_blender(story_file, output):
     blender=shutil.which("blender")
     if not blender: raise RuntimeError("Blender is required")
     cmd=[blender,"--background","--enable-autoexec","--python",str(Path(__file__).resolve()),"--","--cinematic-render","--story",str(Path(story_file).resolve()),"--output",str(Path(output).resolve()),"--fps",str(FPS),"--width",str(WIDTH),"--height",str(HEIGHT)]
-    p=subprocess.run(cmd,capture_output=True,text=True,timeout=1200)
+    p=subprocess.run(cmd,capture_output=True,text=True,timeout=900)
     if p.returncode:
         log.error(p.stdout[-5000:]); log.error(p.stderr[-7000:]); raise RuntimeError("Blender cinematic render failed")
     if not output.exists() or output.stat().st_size<100000: raise RuntimeError("No usable animated render produced")
