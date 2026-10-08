@@ -68,6 +68,11 @@ def _blender_render():
 
     bpy.ops.object.select_all(action="SELECT");bpy.ops.object.delete(use_global=False)
     sc=bpy.context.scene; engines={x.identifier for x in sc.render.bl_rna.properties["engine"].enum_items};sc.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE";sc.render.resolution_x=w;sc.render.resolution_y=h;sc.render.resolution_percentage=100;sc.render.fps=fps
+    try:
+        sc.eevee.taa_render_samples=8
+    except Exception:
+        pass
+    sc.render.use_simplify=True;sc.render.simplify_subdivision=0;sc.render.simplify_child_particles=0
     sc.render.image_settings.file_format="FFMPEG";sc.render.ffmpeg.format="MPEG4";sc.render.ffmpeg.codec="H264";sc.render.ffmpeg.constant_rate_factor="MEDIUM";sc.render.filepath=str(out)
     try:sc.view_settings.look="AgX - Medium High Contrast"
     except Exception:pass
