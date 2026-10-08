@@ -20,12 +20,74 @@ def _sub_filter(srt):
     p=str(Path(srt).resolve()).replace("\\","/").replace(":","\\:")
     return "subtitles='%s':force_style='FontName=DejaVu Sans,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H001B1630,BorderStyle=3,Outline=2,Shadow=1,MarginV=38'"%p
 
-def _assemble(video,audio,srt,out,story):
-    ff=shutil.which("ffmpeg"); title=str(story.get("title","Little Wonder Trails")).replace("'","\\'")
-    vf="minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0,"+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
-    cmd=[ff,"-y","-loglevel","warning","-i",str(video),"-i",str(audio),"-filter_complex","[0:v]"+vf+"[v]","-map","[v]","-map","1:a:0","-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","veryfast"),"-b:v",os.getenv("VIDEO_BITRATE","3500k"),"-maxrate",os.getenv("VIDEO_MAXRATE","4200k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","8400k"),"-c:a","aac","-b:a","160k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(out)]
+def _download_background_reel(job_id, duration=30):
+    """Download relevant free-use nature clips and build a moving background reel."""
+    ff=shutil.which("ffmpeg")
+    try:
+        import yt_dlp
+    except ImportError:
+        log.warning("yt-dlp unavailable; using the existing 3D environment")
+        return None
+    bgdir=DATA/"backgrounds"/job_id
+    bgdir.mkdir(parents=True,exist_ok=True)
+    sources=[
+        ("meadow","https://www.pexels.com/video/spring-meadow-with-grass-and-flowers-857046/"),
+        ("forest","https://www.pexels.com/video/video-of-forest-during-daylight-855585/"),
+        ("leaves","https://www.pexels.com/video/summer-breeze-854709/"),
+        ("valley","https://www.pexels.com/video/beautiful-weather-856572/"),
+    ]
+    clips=[]
+    for name,url in sources:
+        target=bgdir/(name+".mp4")
+        try:
+            opts={"format":"best[height<=720][ext=mp4]/best[height<=720]/best","outtmpl":str(target),"noplaylist":True,"quiet":True,"no_warnings":True,"merge_output_format":"mp4","socket_timeout":20,"retries":1}
+            with yt_dlp.YoutubeDL(opts) as ydl: ydl.download([url])
+            if target.exists() and target.stat().st_size>100000: clips.append(target)
+        except Exception as exc:
+            log.warning("Background clip %s unavailable: %s",name,str(exc)[:180])
+    if len(clips)<2:
+        log.warning("Fewer than two background clips downloaded; using existing render")
+        return None
+    normalized=[]
+    for i,clip in enumerate(clips):
+        dest=bgdir/("normalized_%02d.mp4"%i)
+        cmd=[ff,"-y","-v","error","-stream_loop","-1","-i",str(clip),"-t",str(duration/len(clips)),"-vf","scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30,setsar=1,eq=contrast=1.04:saturation=1.05","-an","-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p",str(dest)]
+        r=subprocess.run(cmd,capture_output=True,text=True,timeout=120)
+        if r.returncode:
+            log.warning("Could not normalize background clip %s",clip.name)
+            continue
+        normalized.append(dest)
+    if len(normalized)<2: return None
+    concat=bgdir/"concat.txt"
+    concat.write_text("".join("file '%s'\n"%p.resolve().as_posix() for p in normalized),encoding="utf-8")
+    reel=bgdir/"background_reel.mp4"
+    r=subprocess.run([ff,"-y","-v","error","-f","concat","-safe","0","-i",str(concat),"-t",str(duration),"-c","copy",str(reel)],capture_output=True,text=True,timeout=120)
+    if r.returncode or not reel.exists() or reel.stat().st_size<100000:
+        log.warning("Background reel assembly failed: %s",r.stderr[-600:])
+        return None
+    log.info("Using %s moving nature background clips",len(normalized))
+    return reel
+
+def _assemble(video,audio,srt,out,story,background=None):
+    ff=shutil.which("ffmpeg")
+    title=str(story.get("title","Little Wonder Trails")).replace("'","\\'")
+    grade="eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0"
+    if background:
+        fg="minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,colorkey=0x00ff00:0.22:0.10"
+        vf="[1:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30[bg];[0:v]"+fg+"[fg];[bg][fg]overlay=shortest=1,fps=30,"+grade+","+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'[v]"%title
+        inputs=["-i",str(video),"-stream_loop","-1","-i",str(background),"-i",str(audio)]
+        audio_map="2:a:0"
+        video_map="[v]"
+    else:
+        vf="minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"+grade+","+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
+        inputs=["-i",str(video),"-i",str(audio)]
+        audio_map="1:a:0"
+        video_map="0:v:0"
+    cmd=[ff,"-y","-loglevel","warning"]+inputs+["-filter_complex",vf,"-map",video_map,"-map",audio_map,"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","veryfast"),"-b:v",os.getenv("VIDEO_BITRATE","3500k"),"-maxrate",os.getenv("VIDEO_MAXRATE","4200k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","8400k"),"-c:a","aac","-b:a","160k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(out)]
     p=subprocess.run(cmd,capture_output=True,text=True,timeout=600)
-    if p.returncode: log.error(p.stderr[-5000:]); raise RuntimeError("Final cinematic assembly failed")
+    if p.returncode:
+        log.error(p.stderr[-5000:])
+        raise RuntimeError("Final cinematic assembly failed")
 
 async def generate_scenes(story,job_id):
     SHOTS.mkdir(parents=True,exist_ok=True); VIDEOS.mkdir(parents=True,exist_ok=True)
@@ -39,7 +101,8 @@ async def generate_scenes(story,job_id):
 
 async def create_animated_video(story,audio_data,scene_data,job_id):
     clips=[Path(x) for x in scene_data["clips"]]; out=VIDEOS/(job_id+".mp4")
-    _assemble(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),out,story)
+    background=_download_background_reel(job_id,MAX_SECONDS)
+    _assemble(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),out,story,background)
     d=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(out)],text=True).strip())
     if not MIN_SECONDS<=d<=MAX_SECONDS: raise RuntimeError("Quality gate duration %.2fs outside %.2f-%.2fs"%(d,MIN_SECONDS,MAX_SECONDS))
     return {"video_file":str(out),"title":story["title"],"description":story.get("description",""),"size_bytes":out.stat().st_size,"duration_seconds":d,"job_id":job_id,"resolution":"1920x1080","fps":30}
@@ -76,12 +139,10 @@ def _blender_render():
     sc.render.image_settings.file_format="FFMPEG";sc.render.ffmpeg.format="MPEG4";sc.render.ffmpeg.codec="H264";sc.render.ffmpeg.constant_rate_factor="MEDIUM";sc.render.filepath=str(out)
     try:sc.view_settings.look="AgX - Medium High Contrast"
     except Exception:pass
-    world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(.035,.055,.09,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=.35
+    world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(0,1,0,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=1.0
 
     grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5)
-    sph("Ground",(0,2,-.7),(18,14,.55),grass)
-    for x,y,s in [(-8,5,1.7),(-5,8,1.2),(7,6,1.6),(10,1,1.1),(-9,-1,1),(6,-4,1)]:
-        sph("Trunk",(x,y,1.1*s),(.32*s,.32*s,1.5*s),wood);sph("Canopy",(x,y,2.8*s),(1.7*s,1.5*s,1.8*s),grass)
+    # Green-screen stage: final assembly composites moving nature footage behind the cast.
 
     def hero(spec,i):
         sp=spec.get("species","").lower();fur,acc=(cream,teal) if "bunny" in sp or "rabbit" in sp else (honey,yellow) if "bear" in sp else (orange,purple)
