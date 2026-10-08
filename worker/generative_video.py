@@ -22,7 +22,7 @@ def _sub_filter(srt):
 
 def _assemble(video,audio,srt,out,story):
     ff=shutil.which("ffmpeg"); title=str(story.get("title","Little Wonder Trails")).replace("'","\\'")
-    vf="fps=30,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0,"+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
+    vf="minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=contrast=1.04:saturation=1.08:gamma=1.01,unsharp=5:5:0.25:5:5:0.0,"+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
     cmd=[ff,"-y","-loglevel","warning","-i",str(video),"-i",str(audio),"-filter_complex","[0:v]"+vf+"[v]","-map","[v]","-map","1:a:0","-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","veryfast"),"-b:v",os.getenv("VIDEO_BITRATE","3500k"),"-maxrate",os.getenv("VIDEO_MAXRATE","4200k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","8400k"),"-c:a","aac","-b:a","160k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(out)]
     p=subprocess.run(cmd,capture_output=True,text=True,timeout=600)
     if p.returncode: log.error(p.stderr[-5000:]); raise RuntimeError("Final cinematic assembly failed")
