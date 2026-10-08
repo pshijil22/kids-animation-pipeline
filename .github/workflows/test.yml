@@ -52,9 +52,9 @@ jobs:
           PIPELINE_MODE: quality_gate
           QUALITY_MIN_SECONDS: '29'
           QUALITY_MAX_SECONDS: '31'
-          BLENDER_RENDER_FPS: '12'
-          BLENDER_RENDER_WIDTH: '960'
-          BLENDER_RENDER_HEIGHT: '540'
+          BLENDER_RENDER_FPS: '8'
+          BLENDER_RENDER_WIDTH: '640'
+          BLENDER_RENDER_HEIGHT: '360'
           BLENDER_SHARDS: '1'
           TTS_ENGINE: piper
           TTS_VOICE: en-us
