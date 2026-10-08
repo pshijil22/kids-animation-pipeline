@@ -46,8 +46,7 @@ def _download_background_reel(job_id, duration=30):
         except Exception as exc:
             log.warning("Background clip %s unavailable: %s",name,str(exc)[:180])
     if len(clips)<2:
-        log.warning("Fewer than two background clips downloaded; using existing render")
-        return None
+        raise RuntimeError("Could not download at least two story-relevant background clips; refusing to publish a green-screen video")
     normalized=[]
     for i,clip in enumerate(clips):
         dest=bgdir/("normalized_%02d.mp4"%i)
@@ -79,10 +78,10 @@ def _assemble(video,audio,srt,out,story,background=None):
         audio_map="2:a:0"
         video_map="[v]"
     else:
-        vf="minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"+grade+","+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'"%title
+        vf="[0:v]minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,"+grade+","+_sub_filter(srt)+",drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%s':fontcolor=white:fontsize=54:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=70:enable='between(t,0.4,3.8)'[v]"%title
         inputs=["-i",str(video),"-i",str(audio)]
         audio_map="1:a:0"
-        video_map="0:v:0"
+        video_map="[v]"
     cmd=[ff,"-y","-loglevel","warning"]+inputs+["-filter_complex",vf,"-map",video_map,"-map",audio_map,"-c:v","libx264","-preset",os.getenv("VIDEO_PRESET","veryfast"),"-b:v",os.getenv("VIDEO_BITRATE","3500k"),"-maxrate",os.getenv("VIDEO_MAXRATE","4200k"),"-bufsize",os.getenv("VIDEO_BUFSIZE","8400k"),"-c:a","aac","-b:a","160k","-ar","48000","-pix_fmt","yuv420p","-movflags","+faststart","-shortest",str(out)]
     p=subprocess.run(cmd,capture_output=True,text=True,timeout=600)
     if p.returncode:
