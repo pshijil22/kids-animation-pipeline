@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y ffmpeg curl blender espeak-ng libegl1 libgl1 libx11-6 libxi6 libxrender1
           python -m pip install --upgrade pip
           pip install -r worker/requirements.txt
-          pip install piper-tts
+          pip install piper-tts yt-dlp
           pip install flake8
       - name: Validate pipeline
         run: |
