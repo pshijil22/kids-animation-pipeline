@@ -96,7 +96,7 @@ def _blender_render():
         return root
 
     cast=story.get("characters",[]);cast=list(cast.values()) if isinstance(cast,dict) else cast;heroes=[hero(c,i) for i,c in enumerate(cast[:3])]
-    cd=bpy.data.cameras.new("Camera");cam=bpy.data.objects.new("Camera",cd);bpy.context.collection.objects.link(cam);sc.camera=cam;cd.dof.use_dof=True;cd.dof.aperture_fstop=2.2
+    cd=bpy.data.cameras.new("Camera");cam=bpy.data.objects.new("Camera",cd);bpy.context.collection.objects.link(cam);sc.camera=cam;cd.dof.use_dof=False;cd.dof.aperture_fstop=5.6
     focus=bpy.data.objects.new("Focus",None);bpy.context.collection.objects.link(focus);cd.dof.focus_object=focus
     for name,energy,size,loc,color in [("Key",1100,7,(-5,-5,9),(1,.72,.48)),("Fill",500,9,(6,-1,6),(.45,.62,1)),("Rim",800,5,(0,7,7),(1,.42,.2))]:
         d=bpy.data.lights.new(name,"AREA");d.energy=energy;d.shape="DISK";d.size=size;d.color=color;o=bpy.data.objects.new(name,d);bpy.context.collection.objects.link(o);o.location=loc
