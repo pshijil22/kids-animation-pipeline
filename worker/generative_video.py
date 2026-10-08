@@ -56,7 +56,8 @@ def _download_background_reel(job_id, duration=30):
             log.warning("Could not normalize background clip %s",clip.name)
             continue
         normalized.append(dest)
-    if len(normalized)<2: return None
+    if len(normalized)<2:
+        raise RuntimeError("Background footage could not be normalized; refusing to publish without moving scenery")
     concat=bgdir/"concat.txt"
     concat.write_text("".join("file '%s'\n"%p.resolve().as_posix() for p in normalized),encoding="utf-8")
     reel=bgdir/"background_reel.mp4"
@@ -136,11 +137,13 @@ def _blender_render():
         pass
     sc.render.use_simplify=True;sc.render.simplify_subdivision=0;sc.render.simplify_child_particles=0
     sc.render.image_settings.file_format="FFMPEG";sc.render.ffmpeg.format="MPEG4";sc.render.ffmpeg.codec="H264";sc.render.ffmpeg.constant_rate_factor="MEDIUM";sc.render.filepath=str(out)
-    try:sc.view_settings.look="AgX - Medium High Contrast"
+    try:
+        sc.view_settings.view_transform="Standard"
+        sc.view_settings.look="Medium High Contrast"
     except Exception:pass
     world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(0,1,0,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=1.0
 
-    grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5)
+    grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5);shadowmat=mat("Soft ground shadow",(.025,.055,.035),1)
     # Green-screen stage: final assembly composites moving nature footage behind the cast.
 
     def hero(spec,i):
@@ -158,6 +161,7 @@ def _blender_render():
         else:
             sph("Ear",(-.42,0,2.62),(.23,.18,.24),fur).parent=root;sph("Ear",(.42,0,2.62),(.23,.18,.24),fur).parent=root
         sph("Accessory",(0,-.60,1.55),(.42,.10,.18),acc).parent=root
+        sph("ContactShadow",(0,.03,.025),(.78,.52,.035),shadowmat).parent=root
         return root
 
     cast=story.get("characters",[]);cast=list(cast.values()) if isinstance(cast,dict) else cast;heroes=[hero(c,i) for i,c in enumerate(cast[:3])]
