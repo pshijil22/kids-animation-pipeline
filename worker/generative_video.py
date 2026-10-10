@@ -185,7 +185,8 @@ def _blender_render():
         is_cave=any(k in textscene for k in ("cave","cavern","crystal","underground","tunnel"))
         is_water=any(k in textscene for k in ("waterfall","river","lake","pond","stream","ocean","water"))
         is_forest=any(k in textscene for k in ("forest","woods","trees","tree","woodland"))
-        is_bedroom=any(k in textscene for k in ("bedroom","bed","wakes","window"))
+        title_and_narration=(str(s.get("title",""))+" "+str(s.get("narration",""))).lower()
+        is_bedroom=any(k in title_and_narration for k in ("bedroom","bed","wakes","window"))
         is_home=any(k in textscene for k in ("cottage","home","house","village")) and not is_bedroom
         is_garden=any(k in textscene for k in ("garden","flower","meadow","valley","path"))
         if not any((is_cave,is_water,is_forest,is_home,is_garden)): is_garden=True
