@@ -138,7 +138,9 @@ def _blender_render():
         o=bpy.context.object;o.name=name;o.data.materials.append(material);return o
     def visible_during(objects,start,end,total):
         for o in objects:
-            for frame,value in ((max(1,start-1),True),(start,False),(end,False),(min(total,end+1),True)):
+            keys=[(max(1,start-1),True),(start,False),(end,False)]
+            if end<total: keys.append((end+1,True))
+            for frame,value in keys:
                 o.hide_render=value;o.keyframe_insert(data_path="hide_render",frame=frame)
                 o.hide_viewport=value;o.keyframe_insert(data_path="hide_viewport",frame=frame)
             anim=o.animation_data
@@ -183,7 +185,8 @@ def _blender_render():
         is_cave=any(k in textscene for k in ("cave","cavern","crystal","underground","tunnel"))
         is_water=any(k in textscene for k in ("waterfall","river","lake","pond","stream","ocean","water"))
         is_forest=any(k in textscene for k in ("forest","woods","trees","tree","woodland"))
-        is_home=any(k in textscene for k in ("cottage","bed","bedroom","home","house","window","village"))
+        is_bedroom=any(k in textscene for k in ("bedroom","bed","wakes","window"))
+        is_home=any(k in textscene for k in ("cottage","home","house","village")) and not is_bedroom
         is_garden=any(k in textscene for k in ("garden","flower","meadow","valley","path"))
         if not any((is_cave,is_water,is_forest,is_home,is_garden)): is_garden=True
         objs=[]
@@ -199,6 +202,14 @@ def _blender_render():
             for j in range(8):
                 objs.append(sph("Water spray %d %d"%(si,j),((j-3.5)*.65,4,1.0+(j%3)*.45),(.13,.13,.13),white,12))
         else:
+            if is_bedroom:
+                wall=mat("Bedroom wall %d"%si,(.94,.72,.48),.95)
+                blanket=mat("Bed blanket %d"%si,(.12,.48,.68),.75)
+                objs.append(box("Bedroom back wall %d"%si,(0,5,2.2),(14,.25,5),wall))
+                objs.append(box("Pip bed frame %d"%si,(-2,2.5,.42),(3.2,1.8,.45),wood))
+                objs.append(box("Pip mattress %d"%si,(-2,2.45,.72),(3.0,1.65,.25),white))
+                objs.append(box("Pip blanket %d"%si,(-1.4,2.35,.88),(1.8,1.6,.12),blanket))
+                objs.append(box("Bedroom window %d"%si,(3,4.8,2.5),(1.8,.12,1.7),crystal))
             if is_home:
                 objs.append(box("Cottage body %d"%si,(-4,4,1.15),(3.8,2.8,2.5),cottage))
                 objs.append(cone("Cottage roof %d"%si,(-4,4,3.05),2.6,1.8,roof))
