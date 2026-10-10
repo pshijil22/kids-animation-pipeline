@@ -103,8 +103,8 @@ async def generate_scenes(story,job_id):
 
 async def create_animated_video(story,audio_data,scene_data,job_id):
     clips=[Path(x) for x in scene_data["clips"]]; out=VIDEOS/(job_id+".mp4")
-    background=_download_background_reel(job_id,MAX_SECONDS)
-    _assemble(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),out,story,background)
+    # Blender now renders story-specific sets for every scene.
+    _assemble(clips[0],Path(audio_data["narration_file"]),Path(audio_data["subtitles_file"]),out,story,None)
     d=float(subprocess.check_output(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(out)],text=True).strip())
     if not MIN_SECONDS<=d<=MAX_SECONDS: raise RuntimeError("Quality gate duration %.2fs outside %.2f-%.2fs"%(d,MIN_SECONDS,MAX_SECONDS))
     return {"video_file":str(out),"title":story["title"],"description":story.get("description",""),"size_bytes":out.stat().st_size,"duration_seconds":d,"job_id":job_id,"resolution":"1920x1080","fps":30}
@@ -130,6 +130,22 @@ def _blender_render():
         if loc is not None:o.location=loc;o.keyframe_insert("location",frame=f)
         if rot is not None:o.rotation_euler=rot;o.keyframe_insert("rotation_euler",frame=f)
     def aim(o,target,f):o.rotation_euler=(Vector(target)-o.location).to_track_quat("-Z","Y").to_euler();o.keyframe_insert("rotation_euler",frame=f)
+    def box(name,loc,scale,material):
+        bpy.ops.mesh.primitive_cube_add(size=1,location=loc)
+        o=bpy.context.object;o.name=name;o.dimensions=scale;bpy.ops.object.transform_apply(location=False,rotation=False,scale=True);o.data.materials.append(material);return o
+    def cone(name,loc,radius,depth,material):
+        bpy.ops.mesh.primitive_cone_add(vertices=8,radius1=radius,radius2=0,depth=depth,location=loc)
+        o=bpy.context.object;o.name=name;o.data.materials.append(material);return o
+    def visible_during(objects,start,end,total):
+        for o in objects:
+            for frame,value in ((max(1,start-1),True),(start,False),(end,False),(min(total,end+1),True)):
+                o.hide_render=value;o.keyframe_insert(data_path="hide_render",frame=frame)
+                o.hide_viewport=value;o.keyframe_insert(data_path="hide_viewport",frame=frame)
+            anim=o.animation_data
+            if anim and anim.action:
+                for fc in anim.action.fcurves:
+                    if fc.data_path in ("hide_render","hide_viewport"):
+                        for point in fc.keyframe_points:point.interpolation="CONSTANT"
 
     bpy.ops.object.select_all(action="SELECT");bpy.ops.object.delete(use_global=False)
     sc=bpy.context.scene; engines={x.identifier for x in sc.render.bl_rna.properties["engine"].enum_items};sc.render.engine="BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines else "BLENDER_EEVEE";sc.render.resolution_x=w;sc.render.resolution_y=h;sc.render.resolution_percentage=100;sc.render.fps=fps
@@ -146,18 +162,60 @@ def _blender_render():
     world=bpy.data.worlds.new("World") if not bpy.data.worlds else bpy.data.worlds[0];sc.world=world;world.use_nodes=True;world.node_tree.nodes["Background"].inputs["Color"].default_value=(.32,.62,.82,1);world.node_tree.nodes["Background"].inputs["Strength"].default_value=.8
 
     grass=mat("Grass",(.12,.30,.10),.9);wood=mat("Wood",(.28,.12,.045),.85);cream=mat("Cream",(.88,.72,.54),.65);teal=mat("Teal",(.03,.45,.48));honey=mat("Honey",(.48,.25,.10),.8);yellow=mat("Yellow",(.88,.55,.08));orange=mat("Orange",(.82,.26,.055));purple=mat("Purple",(.42,.15,.52));white=mat("White",(.97,.97,.92),.35);black=mat("Black",(.008,.006,.006),.2);gold=mat("Glow",(1,.35,.03),.2,5);shadowmat=mat("Soft ground shadow",(.025,.055,.035),1)
-    # A colorful, self-contained storybook environment is always available offline.
-    meadow=sph("Rolling meadow",(0,3,-1.35),(18,10,2.0),grass,32)
+    # Generate independent storybook environments based on each scene's content.
     sunmat=mat("Warm sun",(1,.72,.22),.4,1.2)
-    sph("Sun",(5,5,8),(1.25,1.25,1.25),sunmat,24)
-    for ti,(tx,ty,sz) in enumerate([(-7,2,1.5),(-5,4,1.1),(6,3,1.6),(8,5,1.2),(-9,7,1.0),(9,8,1.3)]):
-        sph("Tree trunk %d"%ti,(tx,ty,sz*.8),(.24,.28,sz*1.1),wood,16)
-        canopy=mat("Canopy%d"%ti,(.12+.025*(ti%3),.34+.04*(ti%2),.12),.9)
-        sph("Tree canopy %d"%ti,(tx,ty,sz*2.0),(sz*1.05,sz*.8,sz*1.05),canopy,20)
-    for fi in range(28):
-        fx=-9+(fi%14)*1.35; fy=-1+(fi//14)*1.15
-        sph("Wildflower stem %d"%fi,(fx,fy,.16),(.035,.035,.28),grass,8)
-        sph("Wildflower %d"%fi,(fx,fy,.42),(.12,.12,.10),yellow if fi%3 else purple,10)
+    skyplants=mat("Deep forest leaves",(.055,.23,.075),.95)
+    flowerpink=mat("Pink flowers",(.95,.20,.42),.55)
+    stone=mat("Cave stone",(.20,.24,.34),.95)
+    crystal=mat("Magic crystal",(.22,.72,1.0),.25,1.8)
+    water=mat("Waterfall blue",(.08,.52,.85),.22,.35)
+    cottage=mat("Cottage walls",(.93,.67,.36),.8)
+    roof=mat("Cottage roof",(.55,.12,.09),.8)
+    pathmat=mat("Golden path",(.64,.42,.19),.9)
+    scene_ranges=[];frame_cursor=1
+    for s in scenes:
+        nframes=max(1,round(float(s.get("duration_seconds",5))*fps))
+        scene_ranges.append((frame_cursor,frame_cursor+nframes-1));frame_cursor+=nframes
+    total_frames=frame_cursor-1
+    for si,s in enumerate(scenes):
+        start_frame,end_frame=scene_ranges[si]
+        textscene=" ".join([str(s.get("title","")),str(s.get("narration",""))]+[str(b.get("subject",""))+" "+str(b.get("action","")) for b in s.get("visual_beats",[])]).lower()
+        is_cave=any(k in textscene for k in ("cave","cavern","crystal","underground","tunnel"))
+        is_water=any(k in textscene for k in ("waterfall","river","lake","pond","stream","ocean","water"))
+        is_forest=any(k in textscene for k in ("forest","woods","trees","tree","woodland"))
+        is_home=any(k in textscene for k in ("cottage","bed","bedroom","home","house","window","village"))
+        is_garden=any(k in textscene for k in ("garden","flower","meadow","valley","path"))
+        if not any((is_cave,is_water,is_forest,is_home,is_garden)): is_garden=True
+        objs=[]
+        floor=stone if is_cave else water if is_water else skyplants if is_forest else grass
+        objs.append(box("Scene%d ground"%si,(0,4,-.38),(36,32,.45),floor))
+        if is_cave:
+            for j,(x,y,z,sz) in enumerate([(-7,5,2,2.0),(-4,8,2.5,2.3),(4,7,2,2.0),(7,5,2.8,2.5),(0,10,3,2.8)]):
+                objs.append(sph("Cave rock %d %d"%(si,j),(x,y,z),(sz,1.0,sz*1.25),stone,16))
+                objs.append(cone("Crystal %d %d"%(si,j),(x-.35,y-.5,z-.25),.42,1.5,crystal))
+        elif is_water:
+            objs.append(box("Waterfall curtain %d"%si,(5,5,2.6),(2.5,.3,5.2),water))
+            objs.append(box("Water pool %d"%si,(1,2.5,-.05),(12,4,.12),water))
+            for j in range(8):
+                objs.append(sph("Water spray %d %d"%(si,j),((j-3.5)*.65,4,1.0+(j%3)*.45),(.13,.13,.13),white,12))
+        else:
+            if is_home:
+                objs.append(box("Cottage body %d"%si,(-4,4,1.15),(3.8,2.8,2.5),cottage))
+                objs.append(cone("Cottage roof %d"%si,(-4,4,3.05),2.6,1.8,roof))
+                objs.append(box("Cottage door %d"%si,(-4,2.55,.7),(.65,.12,1.4),wood))
+                objs.append(box("Cottage window %d"%si,(-4.9,2.52,1.7),(.6,.1,.55),crystal))
+            if is_forest or is_garden:
+                for j,(x,y,h) in enumerate([(-8,5,3.5),(-6,8,2.8),(6,6,3.8),(8,9,3.0),(-9,11,2.8),(9,12,3.4),(-2,10,2.6),(3,13,3.1)]):
+                    objs.append(box("Scene%d tree trunk %d"%(si,j),(x,y,h*.45),(.42,.45,h*.9),wood))
+                    crown=skyplants if is_forest else mat("Garden canopy %d %d"%(si,j),(.10,.38+.025*(j%3),.12),.9)
+                    objs.append(sph("Scene%d tree crown %d"%(si,j),(x,y,h),(1.45,1.1,1.45),crown,16))
+            if is_garden:
+                for j in range(24):
+                    x=-9+(j%12)*1.55;y=1.5+(j//12)*1.35
+                    objs.append(sph("Scene%d flower %d"%(si,j),(x,y,.16),(.18,.18,.13),flowerpink if j%3==0 else yellow,10))
+            if is_forest: objs.append(box("Forest trail %d"%si,(0,1.1,-.08),(3.4,18,.06),pathmat))
+        if not is_cave: objs.append(sph("Scene%d sun"%si,(5,7,7),(1.0,1.0,1.0),sunmat,16))
+        visible_during(objs,start_frame,end_frame,total_frames)
 
     def hero(spec,i):
         sp=spec.get("species","").lower();fur,acc=(cream,teal) if "bunny" in sp or "rabbit" in sp else (honey,yellow) if "bear" in sp else (orange,purple)
