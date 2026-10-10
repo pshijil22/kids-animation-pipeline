@@ -258,6 +258,31 @@ def _blender_render():
                     objs.append(sph("Scene%d flower %d"%(si,j),(x,y,.16),(.18,.18,.13),flowerpink if j%3==0 else yellow,10))
             if is_forest: objs.append(box("Forest trail %d"%si,(0,1.1,-.08),(3.4,18,.06),pathmat))
         if not is_cave and not is_snow: objs.append(sph("Scene%d sun"%si,(5,7,7),(1.0,1.0,1.0),sunmat,16))
+        # Story-specific landmarks: these only appear when the narration calls for them.
+        if any(k in textscene for k in ("rainbow","magical sky","rainbow bridge")):
+            rainbow_mats=[mat("Rainbow red %d"%si,(.95,.12,.16),.5),mat("Rainbow orange %d"%si,(1,.43,.08),.5),mat("Rainbow yellow %d"%si,(1,.82,.12),.5),mat("Rainbow green %d"%si,(.12,.72,.35),.5),mat("Rainbow blue %d"%si,(.12,.42,.95),.5),mat("Rainbow violet %d"%si,(.48,.20,.82),.5)]
+            for ri,rm in enumerate(rainbow_mats):
+                bpy.ops.mesh.primitive_torus_add(major_segments=32,minor_segments=8,location=(0,7,1.0),major_radius=3.0-ri*.18,minor_radius=.09)
+                arc=bpy.context.object;arc.name="Scene%d rainbow arc %d"%(si,ri);arc.scale=(1,.16,1);arc.data.materials.append(rm);objs.append(arc)
+        if any(k in textscene for k in ("bridge","crossing","cross the stream")):
+            objs.append(box("Scene%d story bridge"%si,(0,2,.38),(5.4,1.0,.24),wood))
+            for px in (-2.4,2.4):
+                objs.append(box("Scene%d bridge post"%si,(px,2,.85),(.16,.16,.95),cottage))
+        if any(k in textscene for k in ("treasure","golden chest","treasure chest")):
+            chest=mat("Treasure gold %d"%si,(.95,.57,.06),.28,.4)
+            objs.append(box("Scene%d treasure chest"%si,(2.5,2,.55),(1.25,.8,.85),wood))
+            objs.append(box("Scene%d chest clasp"%si,(2.5,1.56,.58),(.18,.08,.62),chest))
+            for gx in range(3):
+                objs.append(sph("Scene%d treasure coin %d"%(si,gx),(2.1+gx*.35,1.9,1.05),(.16,.10,.08),chest,12))
+        if any(k in textscene for k in ("mushroom","fairy ring","toadstool")):
+            for mi,(mx,my,mh) in enumerate([(-5,3,.9),(5,4,1.25),(-7,7,.7),(7,8,1.0)]):
+                objs.append(box("Scene%d mushroom stem %d"%(si,mi),(mx,my,mh*.35),(.22,.22,mh*.7),white))
+                objs.append(sph("Scene%d mushroom cap %d"%(si,mi),(mx,my,mh*.8),(.48,.42,.24),coral,16))
+        if any(k in textscene for k in ("starry","night sky","moonlight","midnight")):
+            moon=mat("Moonlight %d"%si,(.8,.88,1),.3,1.5)
+            objs.append(sph("Scene%d moon"%si,(5,8,6),(1.0,1.0,1.0),moon,20))
+            for star_i in range(16):
+                objs.append(sph("Scene%d star %d"%(si,star_i),(-8+(star_i%8)*2.2,8+(star_i//8)*1.8,4.8+(star_i%3)*.5),(.07,.07,.07),white,8))
         visible_during(objs,start_frame,end_frame,total_frames)
 
     def hero(spec,i):
@@ -301,9 +326,9 @@ def _blender_render():
                 running=any(k in act for k in ("run","rush","follow","race","walk","step","glide"))
                 jumping=any(k in act for k in ("jump","pop","bounce","stretch"))
                 turning=any(k in act for k in ("look","notice","turn","reach","smile","wakes","watches"))
-                x=base_x + (0.95*bi if running and i==0 else 0)
-                z=0.38 if jumping and bi==1 and i==0 else 0
-                yaw=math.radians(-18 if turning and bi==2 and i==0 else 8 if running and i==0 else 0)
+                x=base_x + (0.72*bi*(1 if i%2==0 else -0.55) if running else 0)
+                z=0.34 if jumping and bi==1 and i%2==0 else 0
+                yaw=math.radians((-18 if i%2==0 else 14) if turning and bi==2 else (8 if running and i%2==0 else -6 if running else 0))
                 key(r,f,(x,0,z),(0,0,yaw))
                 # A subtle secondary head/body nod sells life even in a short shot.
                 if turning and i==0:
