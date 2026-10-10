@@ -171,6 +171,10 @@ def _blender_render():
     stone=mat("Cave stone",(.20,.24,.34),.95)
     crystal=mat("Magic crystal",(.22,.72,1.0),.25,1.8)
     water=mat("Waterfall blue",(.08,.52,.85),.22,.35)
+    sand=mat("Warm beach sand",(.86,.68,.40),.95)
+    snow=mat("Snow",(.78,.88,.96),.8)
+    mountain=mat("Mountain slate",(.31,.39,.48),.95)
+    coral=mat("Coral",(.98,.32,.20),.6)
     cottage=mat("Cottage walls",(.93,.67,.36),.8)
     roof=mat("Cottage roof",(.55,.12,.09),.8)
     pathmat=mat("Golden path",(.64,.42,.19),.9)
@@ -183,20 +187,47 @@ def _blender_render():
         start_frame,end_frame=scene_ranges[si]
         textscene=" ".join([str(s.get("title","")),str(s.get("narration",""))]+[str(b.get("subject",""))+" "+str(b.get("action","")) for b in s.get("visual_beats",[])]).lower()
         is_cave=any(k in textscene for k in ("cave","cavern","crystal","underground","tunnel"))
-        is_water=any(k in textscene for k in ("waterfall","river","lake","pond","stream","ocean","water"))
+        is_beach=any(k in textscene for k in ("beach","ocean","sea shore","seaside","coast","sandcastle","island"))
+        is_snow=any(k in textscene for k in ("snow","ice","frost","winter","glacier","arctic"))
+        is_mountain=any(k in textscene for k in ("mountain","cliff","peak","summit","hilltop"))
+        is_water=any(k in textscene for k in ("waterfall","river","lake","pond","stream","ocean","water")) and not is_beach
         is_forest=any(k in textscene for k in ("forest","woods","trees","tree","woodland"))
         title_and_narration=(str(s.get("title",""))+" "+str(s.get("narration",""))).lower()
         is_bedroom=any(k in title_and_narration for k in ("bedroom","bed","wakes","window"))
         is_home=any(k in textscene for k in ("cottage","home","house","village")) and not is_bedroom
         is_garden=any(k in textscene for k in ("garden","flower","meadow","valley","path"))
-        if not any((is_cave,is_water,is_forest,is_home,is_garden)): is_garden=True
+        if not any((is_cave,is_beach,is_snow,is_mountain,is_water,is_forest,is_home,is_garden)): is_garden=True
         objs=[]
-        floor=stone if is_cave else water if is_water else skyplants if is_forest else grass
+        floor=stone if is_cave else sand if is_beach else snow if is_snow else mountain if is_mountain else water if is_water else skyplants if is_forest else grass
         objs.append(box("Scene%d ground"%si,(0,4,-.38),(36,32,.45),floor))
+        # Color the sky per scene so even distant backgrounds change at every cut.
+        sky=(.10,.14,.28,1) if is_cave else (.34,.72,.94,1) if is_beach else (.70,.84,.98,1) if is_snow else (.42,.65,.86,1) if is_mountain else (.16,.27,.38,1) if is_forest else (.96,.61,.36,1) if is_home else (.34,.68,.91,1)
+        bg=world.node_tree.nodes["Background"].inputs["Color"]
+        bg.default_value=sky;bg.keyframe_insert(data_path="default_value",frame=start_frame)
+        bg.default_value=sky;bg.keyframe_insert(data_path="default_value",frame=end_frame)
         if is_cave:
             for j,(x,y,z,sz) in enumerate([(-7,5,2,2.0),(-4,8,2.5,2.3),(4,7,2,2.0),(7,5,2.8,2.5),(0,10,3,2.8)]):
                 objs.append(sph("Cave rock %d %d"%(si,j),(x,y,z),(sz,1.0,sz*1.25),stone,16))
                 objs.append(cone("Crystal %d %d"%(si,j),(x-.35,y-.5,z-.25),.42,1.5,crystal))
+        elif is_beach:
+            oceanmat=water
+            objs.append(box("Scene%d ocean horizon"%si,(0,10,.1),(36,1,.4),oceanmat))
+            for j in range(4):
+                objs.append(sph("Scene%d dune %d"%(si,j),(-8+j*5.2,7,.1),(3.4,2.0,.32),sand,16))
+            for j in range(3):
+                objs.append(box("Scene%d palm trunk %d"%(si,j),(-7+j*6.4,5,1.6),(.25,.28,3.2),wood))
+                objs.append(sph("Scene%d palm crown %d"%(si,j),(-7+j*6.4,5,3.4),(1.2,.7,.3),skyplants,16))
+            for j in range(5):
+                objs.append(sph("Scene%d shell %d"%(si,j),(-6+j*2.8,1.8,.1),(.22,.14,.12),coral if j%2 else white,12))
+        elif is_snow:
+            for j,(x,y,h) in enumerate([(-8,7,2.8),(-5,9,3.8),(5,8,3.4),(8,10,2.7),(0,12,4.3)]):
+                objs.append(cone("Scene%d snowy peak %d"%(si,j),(x,y,h),h*.8,h*2,snow))
+            for j in range(8):
+                objs.append(sph("Scene%d snow drift %d"%(si,j),(-9+j*2.5,2.5,.0),(1.7,.7,.16),white,12))
+        elif is_mountain:
+            for j,(x,y,h) in enumerate([(-8,8,4.5),(-4,10,5.8),(1,9,4.8),(6,11,6.4),(9,8,4.2)]):
+                objs.append(cone("Scene%d mountain peak %d"%(si,j),(x,y,h*.65),h*.8,h*1.5,mountain))
+                objs.append(cone("Scene%d snow cap %d"%(si,j),(x,y,h*1.12),h*.32,h*.45,snow))
         elif is_water:
             objs.append(box("Waterfall curtain %d"%si,(5,5,2.6),(2.5,.3,5.2),water))
             objs.append(box("Water pool %d"%si,(1,2.5,-.05),(12,4,.12),water))
@@ -226,7 +257,7 @@ def _blender_render():
                     x=-9+(j%12)*1.55;y=1.5+(j//12)*1.35
                     objs.append(sph("Scene%d flower %d"%(si,j),(x,y,.16),(.18,.18,.13),flowerpink if j%3==0 else yellow,10))
             if is_forest: objs.append(box("Forest trail %d"%si,(0,1.1,-.08),(3.4,18,.06),pathmat))
-        if not is_cave: objs.append(sph("Scene%d sun"%si,(5,7,7),(1.0,1.0,1.0),sunmat,16))
+        if not is_cave and not is_snow: objs.append(sph("Scene%d sun"%si,(5,7,7),(1.0,1.0,1.0),sunmat,16))
         visible_during(objs,start_frame,end_frame,total_frames)
 
     def hero(spec,i):
